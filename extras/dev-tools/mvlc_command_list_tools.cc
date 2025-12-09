@@ -36,7 +36,16 @@ int main(int argc, char *argv[])
         input = &inputFile;
     }
 
+    const bool withStackStartEnd = parser["--with-stack-start-end"];
+
     std::vector<mvlc::StackCommand> commands;
+
+    if (withStackStartEnd)
+    {
+        mvlc::StackCommand cmd;
+        cmd.type = mvlc::StackCommand::CommandType::StackStart;
+        commands.push_back(cmd);
+    }
 
     std::string line;
     while (std::getline(*input, line))
@@ -53,6 +62,13 @@ int main(int argc, char *argv[])
         }
     }
 
+    if (withStackStartEnd)
+    {
+        mvlc::StackCommand cmd;
+        cmd.type = mvlc::StackCommand::CommandType::StackEnd;
+        commands.push_back(cmd);
+    }
+
     const int Col1Width = 30;
     const int Col2Width = 20;
     //fmt::println("Parsed {} commands:", commands.size());
@@ -62,7 +78,7 @@ int main(int argc, char *argv[])
         auto buffer = mvlc::make_stack_buffer(std::vector<mvlc::StackCommand>{cmd});
         if (buffer.empty())
             continue;
-        fmt::println("{:#010x}\t{:50}", buffer[0], mvlc::to_string(cmd));
+        fmt::println("{:#010x}\t# {:50}", buffer[0], mvlc::to_string(cmd));
 
         for (size_t i=1; i<buffer.size(); ++i)
         {
