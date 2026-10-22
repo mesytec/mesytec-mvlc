@@ -1,7 +1,7 @@
 # --- ftd3xx vendor driver integration --------------------------------------
 #
-# This file lives at external/ftd3xx/CMakeLists.txt and is pulled in via
-# add_subdirectory(ftd3xx) from external/CMakeLists.txt. All vendor blobs
+# This file lives at external/ftdi-d3xx/CMakeLists.txt and is pulled in via
+# add_subdirectory(ftdi-d3xx) from external/CMakeLists.txt. All vendor blobs
 # are direct children of this same directory (normalized layout; FTDI's own
 # zip layout changes per release, so this tree is what we control — see
 # external/ftd3xx/README.md for re-vendoring steps when a new FTDI package

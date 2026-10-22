@@ -29,9 +29,7 @@
 
 #include "mesytec-mvlc/mesytec-mvlc_export.h"
 #include "mesytec-mvlc/mvlc_basic_interface.h"
-#ifdef MESYTEC_MVLC_PLATFORM_WINDOWS
 #include "mesytec-mvlc/mvlc_impl_support.h"
-#endif
 #include "mesytec-mvlc/mvlc_impl_usb_common.h"
 
 namespace mesytec::mvlc::usb
@@ -136,11 +134,9 @@ class MESYTEC_MVLC_EXPORT Impl: public MVLCBasicInterface, public MVLC_USB_Inter
 
         std::error_code closeHandle();
 
-#ifdef MESYTEC_MVLC_PLATFORM_WINDOWS
         // Note: this used to be a std::array of ReadBuffers but that leads to a
         // stack overflow when Impl is created on the stack.
         std::vector<ReadBuffer<USBStreamPipeReadSize>> m_readBuffers;
-#endif
         DeviceInfo m_deviceInfo;
         bool m_disableTriggersOnConnect = true;
 };

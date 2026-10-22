@@ -46,6 +46,14 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    // Required with libftd3xx-1.x, otherwise reads only return once the full
+    // requested size has been transferred.
+    if ((st = FT_SetStreamPipe(handle, false, true, 0, usb::USBStreamPipeReadSize)))
+    {
+        spdlog::error("Failed to enable stream pipe mode: {}", st);
+        return 1;
+    }
+
     // set timeouts
     if ((st = FT_SetPipeTimeout(handle, get_endpoint(CommandPipe, EndpointDirection::In),
                                 ReadTimeout)))
@@ -83,19 +91,19 @@ int main(int argc, char **argv)
     st = FT_ReadPipeEx(handle, CommandPipe, reinterpret_cast<unsigned char *>(cleanupBuffer.data()),
                        cleanupBuffer.size() * sizeof(u32), &bytesTransferred, ReadTimeout);
 
-    if (st != FT_OK)
-    {
+    if (st == FT_TIMEOUT)
+        spdlog::info("Cleanup read timed out as expected ({}), {} bytes", "FT_ReadPipeEx", bytesTransferred);
+    else if (st != FT_OK)
         spdlog::error("Failed to read from CommandPipe: {} (FT_ReadPipeEx)", st);
-    }
 
     st = FT_ReadPipe(handle, get_endpoint(CommandPipe, EndpointDirection::In),
                      reinterpret_cast<unsigned char *>(cleanupBuffer.data()),
                      cleanupBuffer.size() * sizeof(u32), &bytesTransferred, ReadTimeout);
 
-    if (st != FT_OK)
-    {
+    if (st == FT_TIMEOUT)
+        spdlog::info("Cleanup read timed out as expected ({}), {} bytes", "FT_ReadPipe", bytesTransferred);
+    else if (st != FT_OK)
         spdlog::error("Failed to read from CommandPipe: {} (FT_ReadPipe)", st);
-    }
 
     // now send a refword super command and read the response
     SuperCommandBuilder scb;
