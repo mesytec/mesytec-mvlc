@@ -11,6 +11,31 @@ if (NOT SPHINX_EXECUTABLE)
     return()
 endif()
 
+# Check that the python interpreter running sphinx-build can import the required
+# modules. The interpreter is taken from the sphinx-build shebang line, falling
+# back to the system python3.
+file(STRINGS ${SPHINX_EXECUTABLE} SPHINX_SHEBANG LIMIT_COUNT 1 REGEX "^#!")
+
+if (SPHINX_SHEBANG)
+    string(REGEX REPLACE "^#![ \t]*" "" SPHINX_PYTHON "${SPHINX_SHEBANG}")
+    separate_arguments(SPHINX_PYTHON)
+else()
+    find_package(Python3 COMPONENTS Interpreter)
+    set(SPHINX_PYTHON ${Python3_EXECUTABLE})
+endif()
+
+if (SPHINX_PYTHON)
+    execute_process(
+        COMMAND ${SPHINX_PYTHON} -c "import breathe, sphinx_bootstrap_theme"
+        RESULT_VARIABLE SPHINX_MODULES_RESULT
+        OUTPUT_QUIET ERROR_QUIET)
+endif()
+
+if (NOT SPHINX_PYTHON OR NOT SPHINX_MODULES_RESULT EQUAL 0)
+    message(STATUS "sphinx python modules 'breathe' and/or 'sphinx_bootstrap_theme' not found, documentation will not be built")
+    return()
+endif()
+
 file(REAL_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../src DOXYGEN_STRIP_FROM_PATH)
 
 configure_file(Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
