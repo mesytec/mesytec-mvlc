@@ -28,12 +28,14 @@
 #include <iomanip>
 #include <numeric>
 #include <regex>
+#include <unistd.h>
 
 #include "mvlc_dialog.h"
 #include "mvlc_dialog_util.h"
 #include "mvlc_error.h"
 #include "mvlc_util.h"
 #include "util/logging.h"
+#include "util/pretty_function.h"
 
 namespace
 {
@@ -43,8 +45,6 @@ static const unsigned WriteTimeout_ms = 2000;
 // XXX: Do not raise the read timeout above 1000ms, otherwise mvme rate monitoring will break!
 static const unsigned ReadTimeout_ms  = 1000;
 
-static const size_t DataBufferSize = usb::USBStreamPipeReadSize;
-
 }
 
 namespace mesytec::mvlc::usb
@@ -53,16 +53,19 @@ namespace mesytec::mvlc::usb
 Impl::Impl()
     : m_connectMode{ConnectMode::First, {}, {}}
 {
+    m_readBuffers.resize(PipeCount);
 }
 
 Impl::Impl(unsigned index)
     : m_connectMode{ConnectMode::ByIndex, index, {}}
 {
+    m_readBuffers.resize(PipeCount);
 }
 
 Impl::Impl(const std::string &serial)
     : m_connectMode{ConnectMode::BySerial, 0, serial}
 {
+    m_readBuffers.resize(PipeCount);
 }
 
 Impl::~Impl()
@@ -78,6 +81,9 @@ std::error_code Impl::closeHandle()
     {
         st = FT_Close(m_handle);
         m_handle = nullptr;
+        // libftd3xx arms alarm(5) in streaming FT_ReadPipe() and leaves it
+        // armed if the read fails. The SIGALRM handler uses the closed handle.
+        alarm(0);
     }
 
     return make_error_code(st);
@@ -108,7 +114,7 @@ std::error_code Impl::connect()
                     {
                         m_deviceInfo = infoList[0];
                         auto st = FT_Create(reinterpret_cast<void *>(m_deviceInfo.index),
-                                       FT_OPEN_BY_INDEX, &m_handle);
+                                            FT_OPEN_BY_INDEX, &m_handle);
                         ec = make_error_code(st);
                     }
                     else
@@ -128,7 +134,7 @@ std::error_code Impl::connect()
                         {
                             m_deviceInfo = info;
                             auto st = FT_Create(reinterpret_cast<void *>(m_deviceInfo.index),
-                                           FT_OPEN_BY_INDEX, &m_handle);
+                                                FT_OPEN_BY_INDEX, &m_handle);
                             ec = make_error_code(st);
                             break;
                         }
@@ -143,7 +149,7 @@ std::error_code Impl::connect()
                     if ((m_deviceInfo = get_device_info_by_serial(infoList, m_connectMode.serial)))
                     {
                         auto st = FT_Create(reinterpret_cast<void *>(m_deviceInfo.index),
-                                       FT_OPEN_BY_INDEX, &m_handle);
+                                            FT_OPEN_BY_INDEX, &m_handle);
                         ec = make_error_code(st);
                     }
                 }
@@ -156,6 +162,9 @@ std::error_code Impl::connect()
 
     logger->trace("FT_Create done: {}", ec.message());
 
+    for (auto &readBuffer: m_readBuffers)
+        readBuffer.clear();
+
     if (ec)
         return ec;
 
@@ -167,10 +176,8 @@ std::error_code Impl::connect()
 
     logger->trace("check_chip_configuration done");
 
-    // Set actual read timeouts on the command and data pipes. Note that for
-    // linux the command pipe read timeout is set to 0 later on. This initial
-    // non-zero timeout is used to make the MVLCDialog operations in
-    // post_connect_cleanup() work.
+    // Note: libftd3xx-1.x uses the timeout passed to FT_ReadPipe(), a timeout
+    // of 0 means wait forever.
     for (auto pipe: { Pipe::Command, Pipe::Data})
     {
         if (auto ec = set_endpoint_timeout(
@@ -192,12 +199,17 @@ std::error_code Impl::connect()
 
     logger->trace("set pipe timeouts done");
 
+    // Without streaming mode FT_ReadPipe() only returns once the full
+    // requested size has been read or the timeout expires.
+    if (auto ec = make_error_code(FT_SetStreamPipe(m_handle, false, true, 0, USBStreamPipeReadSize)))
+    {
+        logger->error("FT_SetStreamPipe failed: {}", ec.message());
+        closeHandle();
+        return ec;
+    }
+
     logger->info("opened USB device");
 
-     // TODO: this errors out with FT_IO_ERROR. This is probably thread-safety related:
-     // post_connect_cleanup() reads from both pipes at the same time but does
-     // not lock access to the driver in any way.
-    #if 0
     if (disableTriggersOnConnect())
     {
         for (int try_=0; try_<2; ++try_)
@@ -211,18 +223,6 @@ std::error_code Impl::connect()
                 break;
         }
     }
-    #endif
-
-    // Linux only: after post_connect_cleanup() is done set the command pipes
-    // read timeout to 0 which has the effect of only reading from the FTDI
-    // library buffer.
-    if (auto ec = set_endpoint_timeout(m_handle, get_endpoint(Pipe::Command, EndpointDirection::In), 0))
-    {
-        closeHandle();
-        return ec;
-    }
-
-    logger->trace("linux: CommandPipe read timeout set to 0");
 
     logger->trace("end {}", PRETTY_FUNCTION);
 
@@ -290,30 +290,59 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
     if (static_cast<unsigned>(pipe) >= PipeCount)
         return make_error_code(MVLCErrorCode::InvalidPipe);
 
-    //logger->trace("begin read: pipe={}, size={} bytes",
-    //          static_cast<unsigned>(pipe), size);
+    if (size == 0)
+        return {};
 
+    const size_t requestedSize = size;
+    bytesTransferred = 0u;
+
+    auto &readBuffer = m_readBuffers[static_cast<unsigned>(pipe)];
+
+    auto copy_and_update = [&buffer, &size, &bytesTransferred, &readBuffer] ()
+    {
+        if (size_t toCopy = std::min(readBuffer.size(), size))
+        {
+            memcpy(buffer, readBuffer.first, toCopy);
+            buffer += toCopy;
+            size -= toCopy;
+            readBuffer.first += toCopy;
+            bytesTransferred += toCopy;
+        }
+    };
+
+    copy_and_update();
+
+    if (size == 0)
+        return {};
+
+    assert(readBuffer.size() == 0);
+
+    // libftd3xx-1.x submits a single URB of the requested size. Requests
+    // smaller than the endpoints max packet size overflow and leave the FT60x
+    // IN endpoint in a broken state (EPROTO) until the device port is reset.
+    // Always read the full stream pipe size into the buffer instead.
     ULONG transferred = 0; // FT API wants a ULONG* parameter
 
-    // Possible fix for USB2 CommandTimeout issues with older USB chipsets:
-    // explicitly specify a read timeout here.
-    // -> Makes USB communication very slow.
-    FT_STATUS st = FT_ReadPipeEx(
+    FT_STATUS st = FT_ReadPipe(
         m_handle,
-        get_fifo_id(pipe),
-        buffer, size,
+        get_endpoint(pipe, EndpointDirection::In),
+        readBuffer.data.data(),
+        readBuffer.capacity(),
         &transferred,
-        1);
-
-    bytesTransferred = transferred;
+        ReadTimeout_ms);
 
     auto ec = make_error_code(st);
+
+    readBuffer.first = readBuffer.data.data();
+    readBuffer.last  = readBuffer.first + transferred;
+
+    copy_and_update();
 
     if (ec && ec != ErrorType::Timeout)
     {
         logger->warn("pipe={}, read {} of {} bytes, result={}",
                      static_cast<unsigned>(pipe),
-                     bytesTransferred, size,
+                     bytesTransferred, requestedSize,
                      ec.message().c_str());
     }
 
@@ -337,15 +366,11 @@ std::error_code Impl::read_unbuffered(Pipe pipe, u8 *buffer, size_t size,
     ULONG transferred = 0; // FT API wants a ULONG* parameter
     std::error_code ec = {};
 
-    // Possible fix for USB2 CommandTimeout issues with older USB chipsets:
-    // explicitly specify a read timeout here.
-    // -> Makes USB communication very slow.
-    FT_STATUS st = FT_ReadPipeEx(
-        m_handle,
-        get_fifo_id(pipe),
+    FT_STATUS st = FT_ReadPipe(
+        m_handle, get_endpoint(pipe, EndpointDirection::In),
         buffer, size,
         &transferred,
-        1);
+        ReadTimeout_ms);
 
     bytesTransferred = transferred;
     ec = make_error_code(st);

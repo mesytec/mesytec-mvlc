@@ -1,6 +1,6 @@
 # libftd3xx 1.1.8 on Linux (FT601 / MVLC)
 
-Findings from porting mvlc_impl_usb_linux_x86_64.cc from d3xx 0.5.21 to 1.1.8.
+Findings from porting mvlc_impl_usb_linux.cc from d3xx 0.5.21 to 1.1.8.
 
 - Thin libusb wrapper, no internal URB ring. Each FT_ReadPipe() is one
   libusb_bulk_transfer() of exactly the requested size.
