@@ -31,11 +31,8 @@ class FTErrorCategory: public std::error_category
             case FT_DEVICE_NOT_OPENED_FOR_ERASE:        return "FT_DEVICE_NOT_OPENED_FOR_ERASE";
             case FT_DEVICE_NOT_OPENED_FOR_WRITE:        return "FT_DEVICE_NOT_OPENED_FOR_WRITE";
             case FT_FAILED_TO_WRITE_DEVICE: /* 10 */    return "FT_FAILED_TO_WRITE_DEVICE";
-            case FT_EEPROM_READ_FAILED:                 return "FT_EEPROM_READ_FAILED";
-            case FT_EEPROM_WRITE_FAILED:                return "FT_EEPROM_WRITE_FAILED";
-            case FT_EEPROM_ERASE_FAILED:                return "FT_EEPROM_ERASE_FAILED";
-            case FT_EEPROM_NOT_PRESENT:                 return "FT_EEPROM_NOT_PRESENT";
-            case FT_EEPROM_NOT_PROGRAMMED:              return "FT_EEPROM_NOT_PROGRAMMED";
+            case FT_MEM_INSUFFICIENT_ERROR:             return "FT_MEM_INSUFFICIENT_ERROR";
+            case FT_OVERFLOW_ERROR:                     return "FT_OVERFLOW_ERROR";
             case FT_INVALID_ARGS:                       return "FT_INVALID_ARGS";
             case FT_NOT_SUPPORTED:                      return "FT_NOT_SUPPORTED";
             case FT_NO_MORE_ITEMS:                      return "FT_NO_MORE_ITEMS";
@@ -81,20 +78,17 @@ class FTErrorCategory: public std::error_category
             case FT_DEVICE_NOT_OPENED_FOR_ERASE:
             case FT_DEVICE_NOT_OPENED_FOR_WRITE:
             case FT_FAILED_TO_WRITE_DEVICE:
-            case FT_EEPROM_READ_FAILED:
-            case FT_EEPROM_WRITE_FAILED:
-            case FT_EEPROM_ERASE_FAILED:
-            case FT_EEPROM_NOT_PRESENT:
-            case FT_EEPROM_NOT_PROGRAMMED:
+            case FT_MEM_INSUFFICIENT_ERROR:
+            case FT_OVERFLOW_ERROR:
             case FT_INVALID_ARGS:
             case FT_NOT_SUPPORTED:
             case FT_NO_MORE_ITEMS:
                 return ErrorType::ConnectionError;
 
             case FT_TIMEOUT:
+            case FT_OPERATION_ABORTED:
                 return ErrorType::Timeout;
 
-            case FT_OPERATION_ABORTED:
             case FT_RESERVED_PIPE:
             case FT_INVALID_CONTROL_REQUEST_DIRECTION:
             case FT_INVALID_CONTROL_REQUEST_TYPE:

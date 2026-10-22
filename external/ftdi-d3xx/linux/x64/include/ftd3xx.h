@@ -43,7 +43,6 @@ User Mode
 
 #ifdef __cplusplus
 #include <cstddef>
-#include <cstdbool>
 #include <cstdint>
 #include <cstdio>
 #else
@@ -166,7 +165,7 @@ enum _FT_STATUS {
 	FT_DEVICE_NOT_OPENED_FOR_WRITE,
 	FT_FAILED_TO_WRITE_DEVICE, /* 10 */
 	FT_MEM_INSUFFICIENT_ERROR,
-	FT_OVERFLOW_ERROR, 
+	FT_OVERFLOW_ERROR,
 	FT_INVALID_ARGS =16,
 	FT_NOT_SUPPORTED,
 
@@ -199,7 +198,7 @@ typedef ULONG FT_STATUS;
 //
 // Pipe types
 //
-typedef enum _FT_PIPE_TYPE 
+typedef enum _FT_PIPE_TYPE
 {
 	FTPipeTypeControl,
 	FTPipeTypeIsochronous,
@@ -211,7 +210,7 @@ typedef enum _FT_PIPE_TYPE
 //
 // Common descriptor header
 //
-typedef struct _FT_COMMON_DESCRIPTOR 
+typedef struct _FT_COMMON_DESCRIPTOR
 {
 	UCHAR bLength;
 	UCHAR bDescriptorType;
@@ -243,7 +242,7 @@ typedef struct _FT_DEVICE_DESCRIPTOR
 //
 // Configuration descriptor
 //
-typedef struct _FT_CONFIGURATION_DESCRIPTOR 
+typedef struct _FT_CONFIGURATION_DESCRIPTOR
 {
 	UCHAR   bLength;
 	UCHAR   bDescriptorType;
@@ -259,7 +258,7 @@ typedef struct _FT_CONFIGURATION_DESCRIPTOR
 //
 // Interface descriptor
 //
-typedef struct _FT_INTERFACE_DESCRIPTOR 
+typedef struct _FT_INTERFACE_DESCRIPTOR
 {
 	UCHAR   bLength;
 	UCHAR   bDescriptorType;
@@ -276,7 +275,7 @@ typedef struct _FT_INTERFACE_DESCRIPTOR
 //
 // String descriptor
 //
-typedef struct _FT_STRING_DESCRIPTOR 
+typedef struct _FT_STRING_DESCRIPTOR
 {
 	UCHAR   bLength;
 	UCHAR   bDescriptorType;
@@ -287,7 +286,7 @@ typedef struct _FT_STRING_DESCRIPTOR
 //
 // Pipe information
 //
-typedef struct _FT_PIPE_INFORMATION 
+typedef struct _FT_PIPE_INFORMATION
 {
 	FT_PIPE_TYPE    PipeType;
 	UCHAR           PipeId;
@@ -299,7 +298,7 @@ typedef struct _FT_PIPE_INFORMATION
 //
 // Control setup packet
 //
-typedef struct _FT_SETUP_PACKET 
+typedef struct _FT_SETUP_PACKET
 {
 	UCHAR   RequestType;
 	UCHAR   Request;
@@ -312,7 +311,7 @@ typedef struct _FT_SETUP_PACKET
 //
 // Notification callback type
 //
-typedef enum _E_FT_NOTIFICATION_CALLBACK_TYPE 
+typedef enum _E_FT_NOTIFICATION_CALLBACK_TYPE
 {
 	E_FT_NOTIFICATION_CALLBACK_TYPE_DATA,
 	E_FT_NOTIFICATION_CALLBACK_TYPE_GPIO
@@ -321,7 +320,7 @@ typedef enum _E_FT_NOTIFICATION_CALLBACK_TYPE
 //
 // Notification callback information data
 //
-typedef struct _FT_NOTIFICATION_CALLBACK_INFO_DATA 
+typedef struct _FT_NOTIFICATION_CALLBACK_INFO_DATA
 {
 	ULONG ulRecvNotificationLength;
 	UCHAR ucEndpointNo;
@@ -331,7 +330,7 @@ typedef struct _FT_NOTIFICATION_CALLBACK_INFO_DATA
 //
 // Notification callback information gpio
 //
-typedef struct _FT_NOTIFICATION_CALLBACK_INFO_GPIO 
+typedef struct _FT_NOTIFICATION_CALLBACK_INFO_GPIO
 {
 	BOOL bGPIO0;
 	BOOL bGPIO1;
@@ -368,7 +367,7 @@ typedef VOID(*FT_NOTIFICATION_CALLBACK)(PVOID pvCallbackContext,
 //
 // Chip configuration - FIFO Clock Speed
 //
-typedef enum 
+typedef enum
 {
 	CONFIGURATION_FIFO_CLK_100,
 	CONFIGURATION_FIFO_CLK_66,
@@ -380,7 +379,7 @@ typedef enum
 //
 // Chip configuration - FIFO Mode
 //
-typedef enum 
+typedef enum
 {
 	CONFIGURATION_FIFO_MODE_245,
 	CONFIGURATION_FIFO_MODE_600,
@@ -391,7 +390,7 @@ typedef enum
 //
 // Chip configuration - Channel Configuration
 //
-typedef enum 
+typedef enum
 {
 	CONFIGURATION_CHANNEL_CONFIG_4,
 	CONFIGURATION_CHANNEL_CONFIG_2,
@@ -405,7 +404,7 @@ typedef enum
 //
 // Chip configuration - Optional Feature Support
 //
-typedef enum 
+typedef enum
 {
 	CONFIGURATION_OPTIONAL_FEATURE_DISABLEALL = 0,
 	CONFIGURATION_OPTIONAL_FEATURE_ENABLEBATTERYCHARGING                = (0x1 << 0),
@@ -452,7 +451,7 @@ typedef enum
 //
 // Chip configuration structure
 //
-typedef struct 
+typedef struct
 {
 	// Device Descriptor
 	USHORT       VendorID;
@@ -487,7 +486,7 @@ typedef struct
 // Device types
 //
 
-typedef enum _FT_DEVICE 
+typedef enum _FT_DEVICE
 {
 	FT_DEVICE_UNKNOWN = 3,
 	FT_DEVICE_600 = 600,
@@ -501,7 +500,7 @@ typedef enum _FT_DEVICE
 // Device information
 //
 
-typedef enum _FT_FLAGS 
+typedef enum _FT_FLAGS
 {
 	FT_FLAGS_OPENED = 1, /* Device is currently opened */
 	FT_FLAGS_HISPEED = 2, /* Device supports super-speed USB */
@@ -509,7 +508,7 @@ typedef enum _FT_FLAGS
 
 } FT_FLAGS;
 
-typedef struct _FT_DEVICE_LIST_INFO_NODE 
+typedef struct _FT_DEVICE_LIST_INFO_NODE
 {
 	ULONG Flags; // FT_FLAGS
 	ULONG Type;
@@ -521,7 +520,7 @@ typedef struct _FT_DEVICE_LIST_INFO_NODE
 
 } FT_DEVICE_LIST_INFO_NODE;
 
-enum FT_GPIO_PULL 
+enum FT_GPIO_PULL
 {
 	GPIO_PULL_50K_PD,
 	GPIO_PULL_HIZ,
@@ -530,7 +529,7 @@ enum FT_GPIO_PULL
 
 };
 
-enum FT_PIPE_DIRECTION 
+enum FT_PIPE_DIRECTION
 {
 	FT_PIPE_DIR_IN,
 	FT_PIPE_DIR_OUT,

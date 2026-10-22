@@ -26,4 +26,16 @@ if (MVLC_BUILD_CONTROLLER_TESTS)
         PRIVATE mesytec-mvlc
         PRIVATE spdlog::spdlog
     )
+
+    add_executable(mvlc_ftdi_usb_tester mvlc_ftdi_usb_tester.cc)
+    target_link_libraries(mvlc_ftdi_usb_tester
+        PRIVATE mesytec-mvlc
+        PRIVATE spdlog::spdlog
+    )
+    if (UNIX AND NOT APPLE)
+        target_link_libraries(mvlc_ftdi_usb_tester PRIVATE ftd3xx-static)
+    else()
+        target_link_libraries(mvlc_ftdi_usb_tester PRIVATE ftd3xx)
+    endif()
+
 endif (MVLC_BUILD_CONTROLLER_TESTS)

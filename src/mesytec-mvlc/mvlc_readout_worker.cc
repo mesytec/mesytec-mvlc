@@ -66,6 +66,7 @@
 #include <exception>
 #include <iostream>
 #include <iterator>
+#include <nlohmann/json.hpp>
 
 #ifdef __linux__
 #include <sys/prctl.h>
@@ -1827,6 +1828,13 @@ const char *readout_worker_state_to_string(const ReadoutWorker::State &state)
 
     return "unknown";
 }
+
+ std::string readout_worker_counters_to_json(const ReadoutWorker::Counters &counters)
+ {
+    auto j = nlohmann::json();
+
+    return j;
+ }
 
 } // end namespace mvlc
 } // end namespace mesytec

@@ -287,35 +287,25 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
 
     ULONG transferred = 0; // FT API wants a ULONG* parameter
 
-    FT_STATUS st = {};
-
-    if (getDeviceInfo().flags & DeviceInfo::Flags::USB2)
-    {
-        // Possible fix for USB2 CommandTimeout issues with older USB chipsets:
-        // explicitly specify a read timeout here.
-        // -> Makes USB communication very slow.
-        st = FT_ReadPipeEx(
-            m_handle,
-            get_fifo_id(pipe),
-            buffer, size,
-            &transferred,
-            1);
-    }
-    else
-    {
-        st = FT_ReadPipe(
-            m_handle,
-            get_endpoint(pipe, EndpointDirection::In),
-            buffer, size,
-            &transferred,
-            nullptr);
-    }
+    FT_STATUS st = FT_ReadPipe(
+        m_handle,
+        get_endpoint(pipe, EndpointDirection::In),
+        buffer, size,
+        &transferred,
+        ReadTimeout_ms);
 
     bytesTransferred = transferred;
 
     auto ec = make_error_code(st);
 
     if (ec && ec != ErrorType::Timeout)
+    {
+        logger->warn("pipe={}, read {} of {} bytes, result={}",
+                     static_cast<unsigned>(pipe),
+                     bytesTransferred, size,
+                     ec.message().c_str());
+    }
+    else if (ec && ec == ErrorType::Timeout)
     {
         logger->warn("pipe={}, read {} of {} bytes, result={}",
                      static_cast<unsigned>(pipe),
@@ -347,7 +337,7 @@ std::error_code Impl::read_unbuffered(Pipe pipe, u8 *buffer, size_t size,
         m_handle, get_endpoint(pipe, EndpointDirection::In),
         buffer, size,
         &transferred,
-        nullptr);
+        ReadTimeout_ms);
 
     bytesTransferred = transferred;
     ec = make_error_code(st);
