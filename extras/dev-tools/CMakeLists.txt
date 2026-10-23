@@ -42,6 +42,17 @@ if (MVLC_BUILD_DEV_TOOLS)
         install(TARGETS mvlc-init-daq-repeat RUNTIME DESTINATION bin)
     endif()
 
+    # Low level libftd3xx tools, not linked against mesytec-mvlc.
+    if (UNIX AND NOT APPLE)
+        function(add_mvlc_usb_dev_tool exe_name exe_source)
+            add_executable(${exe_name} ${exe_source})
+            target_link_libraries(${exe_name} PRIVATE ftd3xx-static bfg::lyra)
+        endfunction()
+
+        add_mvlc_usb_dev_tool(mvlc-usb-eproto-recovery mvlc_usb_eproto_recovery.cc)
+        add_mvlc_usb_dev_tool(mvlc-usb-write-unanswered mvlc_usb_write_unanswered.cc)
+    endif()
+
     add_mvlc_dev_tool(mvlc-vme-write-many mvlc_vme_write_many.cc)
     install(TARGETS mvlc-vme-write-many RUNTIME DESTINATION bin)
 
