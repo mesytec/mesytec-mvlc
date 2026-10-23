@@ -44,6 +44,8 @@ using namespace mesytec::mvlc;
 static const unsigned WriteTimeout_ms = 2000;
 // XXX: Do not raise the read timeout above 1000ms, otherwise mvme rate monitoring will break!
 static const unsigned ReadTimeout_ms  = 1000;
+// Short timeout so that the cmd_pipe_reader can quickly react to quit requests.
+static const unsigned CommandReadTimeout_ms = 100;
 
 }
 
@@ -321,15 +323,21 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
     // smaller than the endpoints max packet size overflow and leave the FT60x
     // IN endpoint in a broken state (EPROTO) until the device port is reset.
     // Always read the full stream pipe size into the buffer instead.
+    //
+    // A read only completes early on a short packet. Responses that are an
+    // exact multiple of the packet size would block until the timeout. The
+    // command pipe thus reads a single packet at a time for low latency.
+    const size_t maxPacketSize = (m_deviceInfo.flags & DeviceInfo::Flags::USB2) ? 512 : 1024;
+    const size_t readSize = pipe == Pipe::Command ? maxPacketSize : readBuffer.capacity();
     ULONG transferred = 0; // FT API wants a ULONG* parameter
 
     FT_STATUS st = FT_ReadPipe(
         m_handle,
         get_endpoint(pipe, EndpointDirection::In),
         readBuffer.data.data(),
-        readBuffer.capacity(),
+        readSize,
         &transferred,
-        ReadTimeout_ms);
+        pipe == Pipe::Command ? CommandReadTimeout_ms : ReadTimeout_ms);
 
     auto ec = make_error_code(st);
 

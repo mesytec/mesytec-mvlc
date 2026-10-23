@@ -22,3 +22,8 @@ Findings from porting mvlc_impl_usb_linux.cc from d3xx 0.5.21 to 1.1.8.
 - FTD3XX_LOG_LEVEL env var enables library debug output.
 - Debugging aid: LD_PRELOAD shim on ioctl() logging USBDEVFS_SUBMITURB /
   REAPURB (endpoint, length, status) shows the real USB-level errors.
+- Bulk IN transfers only complete early on a short packet. Responses that are
+  an exact multiple of wMaxPacketSize (1024 USB3, 512 USB2, e.g. scanbus
+  2048 byte mirror responses) block until the read timeout. The FT601/MVLC
+  sends no ZLP. => command pipe reads one max packet per FT_ReadPipe() and
+  uses a 100ms timeout so cmd_pipe_reader quits fast.
