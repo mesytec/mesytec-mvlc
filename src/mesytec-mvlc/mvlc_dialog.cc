@@ -23,6 +23,7 @@
 #include <cassert>
 #include <cstdio>
 #include <iostream>
+#include <random>
 
 #include "mvlc_constants.h"
 #include "mvlc_error.h"
@@ -99,6 +100,9 @@ MVLCDialog_internal::MVLCDialog_internal(MVLCBasicInterface *mvlc)
     , m_logger(get_logger("MVLCDialog"))
 {
     assert(m_mvlc);
+    // Random start value so that stale responses from earlier sessions do not
+    // pass the mirror check.
+    m_referenceWord = std::random_device{}();
 }
 
 std::error_code MVLCDialog_internal::doWrite(const std::vector<u32> &buffer)

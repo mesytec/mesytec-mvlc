@@ -178,6 +178,7 @@ std::error_code check_chip_configuration(void *handle)
 // running DAQ. This is done to make sure the command communication is working
 // properly and no readout data is clogging the USB.
 // Steps:
+// - Read from the command pipe until no more data arrives.
 // - Disable daq mode by writing 0 to the corresponding register.
 //   Errors are ignored except ErrorType::ConnectionError which indicate that
 //   we could not open the USB device or lost the connection.
@@ -205,7 +206,12 @@ std::error_code post_connect_cleanup(Impl &impl)
     // for communication.
     auto fCmd = std::async(std::launch::async, [&] ()
     {
-        std::pair<std::error_code, size_t> ret = {};
+        // Discard stale responses, e.g. from a previous session, which could
+        // otherwise be taken as the response to the first transaction.
+        auto ret = read_pipe_until_empty(impl, Pipe::Command, logger);
+
+        if (ret.first == ErrorType::ConnectionError)
+            return ret;
 
         for (int try_ = 0; try_ < DisableTriggerRetryCount; try_++)
         {

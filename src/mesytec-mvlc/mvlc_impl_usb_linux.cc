@@ -28,6 +28,7 @@
 #include <iomanip>
 #include <numeric>
 #include <regex>
+#include <thread>
 #include <unistd.h>
 
 #include "mvlc_dialog.h"
@@ -44,8 +45,12 @@ using namespace mesytec::mvlc;
 static const unsigned WriteTimeout_ms = 2000;
 // XXX: Do not raise the read timeout above 1000ms, otherwise mvme rate monitoring will break!
 static const unsigned ReadTimeout_ms  = 1000;
-// Short timeout so that the cmd_pipe_reader can quickly react to quit requests.
+// Short command pipe timeout so that the cmd_pipe_reader can quickly react to
+// quit requests and draining the pipe is fast.
 static const unsigned CommandReadTimeout_ms = 100;
+static const unsigned ProbeReadTimeout_ms = 50;
+static const unsigned ReenumerateTimeout_ms = 5000;
+static const unsigned ReenumeratePollInterval_ms = 50;
 
 }
 
@@ -101,113 +106,192 @@ std::error_code Impl::connect()
 
     // Open the USB device. Try multiple times because with USB2 FT_Create()
     // sometimes fails the first time.
-    const int MaxOpenAttempts = 3;
-
-    auto infoList = get_device_info_list();
-    std::error_code ec;
-
-    for (int attempt=0; attempt<MaxOpenAttempts; ++attempt)
+    auto open_device = [this] (const ConnectMode &connectMode)
     {
-        switch (m_connectMode.mode)
+        const int MaxOpenAttempts = 3;
+
+        auto infoList = get_device_info_list();
+        std::error_code ec;
+
+        for (int attempt=0; attempt<MaxOpenAttempts; ++attempt)
         {
-            case ConnectMode::First:
-                {
-                    if (!infoList.empty())
+            switch (connectMode.mode)
+            {
+                case ConnectMode::First:
                     {
-                        m_deviceInfo = infoList[0];
-                        auto st = FT_Create(reinterpret_cast<void *>(m_deviceInfo.index),
-                                            FT_OPEN_BY_INDEX, &m_handle);
-                        ec = make_error_code(st);
-                    }
-                    else
-                    {
-                        ec = MVLCErrorCode::USBNoDeviceFound;
-                    }
-                }
-                break;
-
-            case ConnectMode::ByIndex:
-                {
-                    ec = MVLCErrorCode::USBNoDeviceFound;
-
-                    for (auto &info: infoList)
-                    {
-                        if (info.index == static_cast<int>(m_connectMode.index))
+                        if (!infoList.empty())
                         {
-                            m_deviceInfo = info;
+                            m_deviceInfo = infoList[0];
                             auto st = FT_Create(reinterpret_cast<void *>(m_deviceInfo.index),
                                                 FT_OPEN_BY_INDEX, &m_handle);
                             ec = make_error_code(st);
-                            break;
+                        }
+                        else
+                        {
+                            ec = MVLCErrorCode::USBNoDeviceFound;
                         }
                     }
-                }
-                break;
+                    break;
 
-            case ConnectMode::BySerial:
-                {
-                    ec = MVLCErrorCode::USBNoDeviceFound;
-
-                    if ((m_deviceInfo = get_device_info_by_serial(infoList, m_connectMode.serial)))
+                case ConnectMode::ByIndex:
                     {
-                        auto st = FT_Create(reinterpret_cast<void *>(m_deviceInfo.index),
-                                            FT_OPEN_BY_INDEX, &m_handle);
-                        ec = make_error_code(st);
+                        ec = MVLCErrorCode::USBNoDeviceFound;
+
+                        for (auto &info: infoList)
+                        {
+                            if (info.index == static_cast<int>(connectMode.index))
+                            {
+                                m_deviceInfo = info;
+                                auto st = FT_Create(reinterpret_cast<void *>(m_deviceInfo.index),
+                                                    FT_OPEN_BY_INDEX, &m_handle);
+                                ec = make_error_code(st);
+                                break;
+                            }
+                        }
                     }
-                }
+                    break;
+
+                case ConnectMode::BySerial:
+                    {
+                        ec = MVLCErrorCode::USBNoDeviceFound;
+
+                        if ((m_deviceInfo = get_device_info_by_serial(infoList, connectMode.serial)))
+                        {
+                            auto st = FT_Create(reinterpret_cast<void *>(m_deviceInfo.index),
+                                                FT_OPEN_BY_INDEX, &m_handle);
+                            ec = make_error_code(st);
+                        }
+                    }
+                    break;
+            }
+
+            if (!ec)
                 break;
         }
 
-        if (!ec)
-            break;
-    }
+        return ec;
+    };
+
+    auto setup_device = [this, &logger] () -> std::error_code
+    {
+        for (auto &readBuffer: m_readBuffers)
+            readBuffer.clear();
+
+        if (auto ec = check_chip_configuration(m_handle))
+        {
+            closeHandle();
+            return ec;
+        }
+
+        logger->trace("check_chip_configuration done");
+
+        // Note: libftd3xx-1.x uses the timeout passed to FT_ReadPipe(), a timeout
+        // of 0 means wait forever.
+        for (auto pipe: { Pipe::Command, Pipe::Data})
+        {
+            if (auto ec = set_endpoint_timeout(
+                    m_handle, get_endpoint(pipe, EndpointDirection::In),
+                    ReadTimeout_ms))
+            {
+                closeHandle();
+                return ec;
+            }
+
+            if (auto ec = set_endpoint_timeout(
+                    m_handle, get_endpoint(pipe, EndpointDirection::Out),
+                    WriteTimeout_ms))
+            {
+                closeHandle();
+                return ec;
+            }
+        }
+
+        logger->trace("set pipe timeouts done");
+
+        // Without streaming mode FT_ReadPipe() only returns once the full
+        // requested size has been read or the timeout expires.
+        if (auto ec = make_error_code(FT_SetStreamPipe(m_handle, false, true, 0, USBStreamPipeReadSize)))
+        {
+            logger->error("FT_SetStreamPipe failed: {}", ec.message());
+            closeHandle();
+            return ec;
+        }
+
+        return {};
+    };
+
+    // An FT60x IN endpoint can be left in an error state where every read
+    // fails with FT_OPERATION_ABORTED (EPROTO), e.g. after a read smaller
+    // than the max packet size. Only a device port reset recovers from this.
+    // Probe data is discarded: command pipe data is stale at this point. The
+    // data pipe is only probed if post_connect_cleanup() runs and discards
+    // pending readout data anyway.
+    auto in_endpoint_broken = [this] (Pipe pipe)
+    {
+        auto &readBuffer = m_readBuffers[static_cast<unsigned>(pipe)];
+        ULONG transferred = 0;
+
+        FT_STATUS st = FT_ReadPipe(
+            m_handle, get_endpoint(pipe, EndpointDirection::In),
+            readBuffer.data.data(), readBuffer.capacity(),
+            &transferred, ProbeReadTimeout_ms);
+
+        readBuffer.clear();
+
+        return st == FT_OPERATION_ABORTED;
+    };
+
+    auto endpoints_broken = [&] ()
+    {
+        return in_endpoint_broken(Pipe::Command)
+            || (disableTriggersOnConnect() && in_endpoint_broken(Pipe::Data));
+    };
+
+    auto ec = open_device(m_connectMode);
 
     logger->trace("FT_Create done: {}", ec.message());
 
-    for (auto &readBuffer: m_readBuffers)
-        readBuffer.clear();
+    if (!ec)
+        ec = setup_device();
 
     if (ec)
         return ec;
 
-    if (auto ec = check_chip_configuration(m_handle))
+    if (endpoints_broken())
     {
+        logger->warn("USB IN endpoint in error state, resetting the device port");
+
+        // The device re-enumerates after the reset. Reopen it by serial.
+        FT_ResetDevicePort(m_handle);
         closeHandle();
-        return ec;
-    }
 
-    logger->trace("check_chip_configuration done");
+        const ConnectMode bySerial{ConnectMode::BySerial, 0, m_deviceInfo.serial};
 
-    // Note: libftd3xx-1.x uses the timeout passed to FT_ReadPipe(), a timeout
-    // of 0 means wait forever.
-    for (auto pipe: { Pipe::Command, Pipe::Data})
-    {
-        if (auto ec = set_endpoint_timeout(
-                m_handle, get_endpoint(pipe, EndpointDirection::In),
-                ReadTimeout_ms))
+        for (unsigned waited_ms=0; waited_ms<ReenumerateTimeout_ms; waited_ms+=ReenumeratePollInterval_ms)
         {
-            closeHandle();
+            std::this_thread::sleep_for(std::chrono::milliseconds(ReenumeratePollInterval_ms));
+
+            if (!(ec = open_device(bySerial)))
+                break;
+        }
+
+        if (!ec)
+            ec = setup_device();
+
+        if (ec)
+        {
+            logger->error("reopening USB device after port reset failed: {}", ec.message());
             return ec;
         }
 
-        if (auto ec = set_endpoint_timeout(
-                m_handle, get_endpoint(pipe, EndpointDirection::Out),
-                WriteTimeout_ms))
+        if (endpoints_broken())
         {
+            logger->error("USB IN endpoint still in error state after port reset");
             closeHandle();
-            return ec;
+            return make_error_code(FT_OPERATION_ABORTED);
         }
-    }
 
-    logger->trace("set pipe timeouts done");
-
-    // Without streaming mode FT_ReadPipe() only returns once the full
-    // requested size has been read or the timeout expires.
-    if (auto ec = make_error_code(FT_SetStreamPipe(m_handle, false, true, 0, USBStreamPipeReadSize)))
-    {
-        logger->error("FT_SetStreamPipe failed: {}", ec.message());
-        closeHandle();
-        return ec;
+        logger->info("USB device port reset successful");
     }
 
     logger->info("opened USB device");
@@ -224,6 +308,11 @@ std::error_code Impl::connect()
             else
                 break;
         }
+
+        // The cleanup drains the pipes using unbuffered reads. Discard
+        // leftovers from the buffered reads done by the cleanup dialog.
+        for (auto &readBuffer: m_readBuffers)
+            readBuffer.clear();
     }
 
     logger->trace("end {}", PRETTY_FUNCTION);
@@ -378,7 +467,7 @@ std::error_code Impl::read_unbuffered(Pipe pipe, u8 *buffer, size_t size,
         m_handle, get_endpoint(pipe, EndpointDirection::In),
         buffer, size,
         &transferred,
-        ReadTimeout_ms);
+        pipe == Pipe::Command ? CommandReadTimeout_ms : ReadTimeout_ms);
 
     bytesTransferred = transferred;
     ec = make_error_code(st);

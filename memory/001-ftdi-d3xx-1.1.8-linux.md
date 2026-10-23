@@ -27,3 +27,17 @@ Findings from porting mvlc_impl_usb_linux.cc from d3xx 0.5.21 to 1.1.8.
   2048 byte mirror responses) block until the read timeout. The FT601/MVLC
   sends no ZLP. => command pipe reads one max packet per FT_ReadPipe() and
   uses a 100ms timeout so cmd_pipe_reader quits fast.
+- EPROTO recovery: FT_AbortPipe, FT_FlushPipe, Clear/SetStreamPipe and
+  close/reopen do not help. FT_ResetDevicePort() works but the device
+  re-enumerates (new usb address, handle dead, FT_Create ok after ~350ms).
+  USBDEVFS_RESET ioctl also works (~190ms, keeps the address, requires the
+  FT handle to be closed). Commands sent while broken are lost.
+  => connect() probes the IN endpoints (50ms read), on FT_OPERATION_ABORTED
+  it resets the port and reopens by serial.
+- Broken state symptoms: first read FT_OPERATION_ABORTED after ~18ms, then
+  ~3.6ms per read. A healthy idle pipe returns FT_TIMEOUT.
+- Stale command responses at connect: the cleanup dialog started with
+  reference word 1, same as the previous session, so stale mirrors passed
+  check_mirror(). Also read_unbuffered() bypasses m_readBuffers, so buffered
+  leftovers survived the cleanup drain. => random dialog ref start, initial
+  cmd pipe drain in post_connect_cleanup(), read buffers cleared afterwards.
