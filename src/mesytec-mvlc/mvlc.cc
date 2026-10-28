@@ -410,7 +410,7 @@ void cmd_pipe_reader(ReaderContext &context)
                             {
                                 logger->warn("cmd_pipe_reader: super ref mismatch, wanted=0x{:04x}, got=0x{:04x}",
                                              pendingResponse->reference, superRef);
-                                logger->warn("cmd_pipe_reader: input buffer before super ref mismatch: {#:010x}", fmt::join(buffer.viewU32(), ", "));
+                                logger->warn("cmd_pipe_reader: input buffer before super ref mismatch: {:#010x}", fmt::join(buffer.viewU32(), ", "));
                                 ec = make_error_code(MVLCErrorCode::SuperReferenceMismatch);
                                 ++counters.superRefMismatches;
                             }
@@ -466,7 +466,7 @@ void cmd_pipe_reader(ReaderContext &context)
                         {
                             logger->warn("cmd_pipe_reader: stack ref mismatch, wanted=0x{:08x}, got=0x{:08x}",
                                          pendingResponse->reference, stackRef);
-                            logger->warn("cmd_pipe_reader: input buffer before stack ref mismatch: 0x{:08x}", fmt::join(buffer.viewU32(), ", "));
+                            logger->warn("cmd_pipe_reader: input buffer before stack ref mismatch: {:#010x}", fmt::join(buffer.viewU32(), ", "));
                             ec = make_error_code(MVLCErrorCode::StackReferenceMismatch);
                             ++counters.stackRefMismatches;
                         }
@@ -970,7 +970,7 @@ std::error_code CmdApi::stackTransactionImpl(
     // stack response
     if (stackFuture.wait_for(ResultWaitTimeout) != std::future_status::ready)
     {
-        get_logger("mvlc_apiv2")->warn("stackTransactionImpl: stack future still not ready -> StackCommandTimeout (ref=0x{:08x})",
+        get_logger("mvlc_apiv2")->warn("stackTransactionImpl: stack future still not ready -> StackCommandTimeout (ref=0x{:08x}, attempt={}/{})",
             readerContext_.pendingStack.access()->reference,
             attempt, TransactionMaxAttempts);
         ec = make_error_code(MVLCErrorCode::StackCommandTimeout);
@@ -1389,7 +1389,7 @@ std::error_code CmdApi::vmeBlockReadSwapped(
     u32 stackRef = readerContext_.nextStackReference++;
 
     get_logger("mvlc")->debug("vmeBlockReadSwapped(): address=0x{:08X}, amod=0x{:02X}, maxTransfers={}, fifo={}, stackRef=0x{:08X}",
-        address, maxTransfers, amod, fifo, stackRef);
+        address, amod, maxTransfers, fifo, stackRef);
 
     StackCommandBuilder stackBuilder;
     stackBuilder.addWriteMarker(stackRef);
