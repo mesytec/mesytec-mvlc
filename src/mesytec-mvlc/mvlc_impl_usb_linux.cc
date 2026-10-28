@@ -414,13 +414,8 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
     // libftd3xx-1.x submits a single URB of the requested size. Requests
     // smaller than the endpoints max packet size overflow and leave the FT60x
     // IN endpoint in a broken state (EPROTO) until the device port is reset.
-    // Always read the full stream pipe size into the buffer instead.
-    //
-    // A read only completes early on a short packet. Responses that are an
-    // exact multiple of the packet size would block until the timeout. The
-    // command pipe thus reads a single packet at a time for low latency.
-    const size_t maxPacketSize = (m_deviceInfo.flags & DeviceInfo::Flags::USB2) ? 512 : 1024;
-    const size_t readSize = pipe == Pipe::Command ? maxPacketSize : readBuffer.capacity();
+    // Always read at least a full packet into the buffer instead.
+    const size_t readSize = read_size(pipe);
     ULONG transferred = 0; // FT API wants a ULONG* parameter
 
     FT_STATUS st = m_ft->ReadPipe(

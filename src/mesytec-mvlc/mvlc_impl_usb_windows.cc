@@ -294,6 +294,10 @@ std::error_code Impl::connect()
 
 #ifdef MESYTEC_MVLC_PLATFORM_WINDOWS
 #if USB_WIN_USE_STREAMPIPE
+    // The stream size is the amount of data the FT60x sends per read
+    // session. With a smaller stream size the chip stops after the first
+    // chunk, so the command pipe reads (see read_size()) are smaller than
+    // the stream size.
     logger->trace("enabling streaming mode for all read pipes, size={}", USBStreamPipeReadSize);
     // FT_SetStreamPipe(handle, allWritePipes, allReadPipes, pipeID, streamSize)
     st = m_ft->SetStreamPipe(m_handle, false, true, 0, USBStreamPipeReadSize);
@@ -523,8 +527,8 @@ std::error_code Impl::write(Pipe pipe, const u8 *buffer, size_t size,
  * requested is available.
  * To work around the above issue the windows implementation uses a single read
  * buffer of size USBSingleTransferMaxBytes and only issues read requests of
- * that size. Client requests are satisfied from buffered data until the buffer
- * is empty at which point another full sized read is performed.
+ * read_size(pipe). Client requests are satisfied from buffered data until the
+ * buffer is empty at which point another read is performed.
  */
 std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
                            size_t &bytesTransferred)
@@ -581,12 +585,10 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
 
     ULONG transferred = 0; // FT API wants a ULONG* parameter
 
-#if !USB_WIN_USE_ASYNC
+    const size_t readSize = read_size(pipe);
+    assert(readSize <= readBuffer.capacity());
 
-#if USB_WIN_USE_STREAMPIPE
-    if (readBuffer.capacity() != USBStreamPipeReadSize)
-        throw std::runtime_error("Read size does not equal stream pipe size");
-#endif
+#if !USB_WIN_USE_ASYNC
 
 #if USB_WIN_USE_EX_FUNCTIONS
     logger->trace("read(): sync read (Ex variant)");
@@ -594,7 +596,7 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
     FT_STATUS st = m_ft->ReadPipeEx(
         m_handle, get_endpoint(pipe, EndpointDirection::In),
         readBuffer.data.data(),
-        readBuffer.capacity(),
+        readSize,
         &transferred,
         nullptr);
 #else // !USB_WIN_USE_EX_FUNCTIONS
@@ -603,7 +605,7 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
     FT_STATUS st = m_ft->ReadPipe(
         m_handle, get_endpoint(pipe, EndpointDirection::In),
         readBuffer.data.data(),
-        readBuffer.capacity(),
+        readSize,
         &transferred,
         nullptr);
 #endif // USB_WIN_USE_EX_FUNCTIONS
@@ -627,7 +629,7 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
         st = m_ft->ReadPipe(
             m_handle, get_endpoint(pipe, EndpointDirection::In),
             readBuffer.data.data(),
-            readBuffer.capacity(),
+            readSize,
             &transferred,
             &vOverlapped);
 
@@ -762,13 +764,12 @@ std::error_code Impl::read_unbuffered(Pipe pipe, u8 *buffer, size_t size,
     std::error_code ec = {};
 
 #ifdef MESYTEC_MVLC_PLATFORM_WINDOWS
-#if !USB_WIN_USE_ASYNC
+    if (size < read_size(pipe))
+        throw std::runtime_error("Read size is smaller than the pipes read size");
 
-#if USB_WIN_USE_STREAMPIPE
-    //logger->info("streampipe check");
-    if (size != usb::USBSingleTransferMaxBytes)
-        throw std::runtime_error("Read size does not equal stream pipe size");
-#endif
+    size = read_size(pipe);
+
+#if !USB_WIN_USE_ASYNC
 
 #if USB_WIN_USE_EX_FUNCTIONS
     FT_STATUS st = m_ft->ReadPipeEx(

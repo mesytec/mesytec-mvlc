@@ -130,6 +130,18 @@ DeviceInfo get_device_info_by_serial(const DeviceInfoList &infoList, const std::
     return it != infoList.end() ? *it : DeviceInfo{};
 }
 
+// A read only completes early on a short packet. Responses that are an exact
+// multiple of the packet size (e.g. 2048 byte scanbus mirror responses) would
+// block until the timeout. The command pipe thus reads a single packet at a
+// time. The data pipe reads the full stream pipe size for throughput.
+size_t Impl::read_size(Pipe pipe) const
+{
+    if (pipe == Pipe::Command)
+        return (m_deviceInfo.flags & DeviceInfo::Flags::USB2) ? 512 : 1024;
+
+    return USBStreamPipeReadSize;
+}
+
 std::error_code check_chip_configuration(const Ftd3xxApi *ft, void *handle)
 {
     FT_60XCONFIGURATION conf = {};

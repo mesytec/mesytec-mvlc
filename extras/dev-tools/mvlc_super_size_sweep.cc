@@ -49,6 +49,7 @@ int main(int argc, char *argv[])
                 sb.addReferenceWord(static_cast<u16>(i));
 
             const auto requestBytes = make_command_buffer(sb).size() * sizeof(u32);
+            response.clear();
             auto tStart = std::chrono::steady_clock::now();
             auto ec = mvlc.superTransaction(sb, response);
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
