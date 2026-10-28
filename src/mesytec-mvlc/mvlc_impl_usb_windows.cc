@@ -48,6 +48,10 @@ using namespace mesytec::mvlc;
 static const unsigned WriteTimeout_ms = 2000;
 // XXX: Do not raise the read timeout above 1000ms, otherwise mvme rate monitoring will break!
 static const unsigned ReadTimeout_ms  = 1000;
+// Short command pipe timeout: an IN request queued directly after a short
+// packet is sometimes not serviced (USB2). The next read request gets the
+// data immediately.
+static const unsigned CommandReadTimeout_ms = 100;
 
 }
 
@@ -259,7 +263,7 @@ std::error_code Impl::connect()
     {
         if (auto ec = set_endpoint_timeout(
                 m_ft, m_handle, get_endpoint(pipe, EndpointDirection::In),
-                ReadTimeout_ms))
+                pipe == Pipe::Command ? CommandReadTimeout_ms : ReadTimeout_ms))
         {
             closeHandle();
             return ec;
@@ -641,7 +645,9 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
     }
 #endif // USB_WIN_USE_ASYNC
 
-    if (st != FT_OK && st != FT_IO_PENDING)
+    // Aborting flushes pending data in the FT60x. Keep it on command pipe
+    // timeouts so that the response can be read with the next request.
+    if (st != FT_OK && st != FT_IO_PENDING && !(pipe == Pipe::Command && st == FT_TIMEOUT))
         abort_pipe(m_ft, m_handle, pipe, EndpointDirection::In);
 
     auto ec = make_error_code(st);
@@ -819,7 +825,9 @@ std::error_code Impl::read_unbuffered(Pipe pipe, u8 *buffer, size_t size,
     logger->trace("result from unbuffered read: pipe={}, size={} bytes, ec={}",
               static_cast<unsigned>(pipe), size, make_error_code(st).message().c_str());
 
-    if (st != FT_OK && st != FT_IO_PENDING)
+    // Aborting flushes pending data in the FT60x. Keep it on command pipe
+    // timeouts so that the response can be read with the next request.
+    if (st != FT_OK && st != FT_IO_PENDING && !(pipe == Pipe::Command && st == FT_TIMEOUT))
         abort_pipe(m_ft, m_handle, pipe, EndpointDirection::In);
 
 #else // linux
