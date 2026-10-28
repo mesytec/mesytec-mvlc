@@ -247,56 +247,51 @@ void cmd_pipe_reader(ReaderContext &context)
             || is_stackerror_notification(header);
     };
 
-    auto contains_complete_frame = [&] (const u32 *begin, const u32 *const end) -> bool
+    enum class FrameState { Complete, Incomplete, BadContinuation };
+
+    struct FrameCheck
     {
-        assert(end - begin >= 0);
+        FrameState state;
+        size_t badHeaderOffset; // Offset of the bad continuation header if state == BadContinuation
+    };
 
-        if (end - begin == 0)
-        {
-            logger->warn("contains_complete_frame: empty data given -> returning false");
-            assert(!"do not call me with empty data!");
-            return false;
-        }
-
+    // Checks if the frame at begin and all its continuation frames are
+    // complete. If a continuation header is not a valid frame header the frame
+    // chain is broken and can never complete.
+    auto check_frame = [&] (const u32 *const begin, const u32 *const end) -> FrameCheck
+    {
+        assert(end - begin > 0);
         assert(is_good_header(*begin));
 
-        auto frameInfo = extract_frame_info(*begin);
-        auto avail = end - begin;
+        const u32 *header = begin;
+        auto frameInfo = extract_frame_info(*header);
+        auto avail = end - header;
 
         if (frameInfo.len + 1 > avail)
-            return false;
+            return { FrameState::Incomplete, 0 };
 
         while (frameInfo.flags & frame_flags::Continue)
         {
-            begin += frameInfo.len + 1;
-            avail = end - begin;
+            header += frameInfo.len + 1;
+            avail = end - header;
 
             if (avail <= 0)
-                return false;
+                return { FrameState::Incomplete, 0 };
 
-            u32 header = *begin;
+            if (!is_good_header(*header))
+                return { FrameState::BadContinuation, static_cast<size_t>(header - begin) };
 
-            if (!is_good_header(header))
-            {
-                logger->warn("cmd_pipe_reader: contains_complete_frame: landed on bad header word: 0x{:08x}, avail={}", header, avail);
-                auto buffer = basic_string_view<u32>(begin, std::distance(begin, end));
-                //log_buffer(logger, spdlog::level::warn, buffer, "cmd_pipe_reader read buffer", LogBuffersMaxWords);
-                logger->trace("cmd_pipe_reader read buffer: {:#010x}", fmt::join(buffer, ", "));
-                assert(!"bad header word");
-                return false; // FIXME: have to empty the internal buffer as we otherwise will remain in this state and continously hit the bad header word
-            }
-
-            frameInfo = extract_frame_info(header);
+            frameInfo = extract_frame_info(*header);
 
             if (frameInfo.len + 1 > avail)
-                return false;
+                return { FrameState::Incomplete, 0 };
         }
 
-        return true;
+        return { FrameState::Complete, 0 };
     };
 
     // Size of the frame starting at header including all continuation frames.
-    // Only valid if contains_complete_frame() returned true.
+    // Only valid if check_frame() returned FrameState::Complete.
     auto frame_size_with_continuations = [] (const u32 *header) -> size_t
     {
         auto frameInfo = extract_frame_info(*header);
@@ -365,7 +360,22 @@ void cmd_pipe_reader(ReaderContext &context)
             if (buffer.empty())
                 continue;
 
-            if (contains_complete_frame(buffer.begin(), buffer.end()))
+            const auto frameCheck = check_frame(buffer.begin(), buffer.end());
+
+            if (frameCheck.state == FrameState::BadContinuation)
+            {
+                // Drop the broken frame chain. The bad header word is then
+                // skipped by the invalid header handling above.
+                logger->warn("cmd_pipe_reader: bad continuation header 0x{:08x} at offset {}, dropping frame 0x{:08x} ({} words)",
+                             buffer[frameCheck.badHeaderOffset], frameCheck.badHeaderOffset,
+                             buffer[0], frameCheck.badHeaderOffset);
+                logger->trace("cmd_pipe_reader: buffer containing the bad continuation header: {:#010x}",
+                              fmt::join(buffer.viewU32(), ", "));
+                ++counters.brokenFrames;
+                counters.wordsSkipped += frameCheck.badHeaderOffset;
+                buffer.consume(frameCheck.badHeaderOffset);
+            }
+            else if (frameCheck.state == FrameState::Complete)
             {
                 logger->trace("cmd_pipe_reader: received complete frame: {:#010x}", fmt::join(buffer.viewU32(), ", "));
 

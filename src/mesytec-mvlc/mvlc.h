@@ -66,6 +66,10 @@ struct MESYTEC_MVLC_EXPORT CmdPipeCounters
     // with any continuations following them.
     size_t orphanedContinuations;
 
+    // Super/stack frames followed by an invalid continuation header. These are
+    // dropped up to the invalid header.
+    size_t brokenFrames;
+
     // New for FW0039: counters for the safe retry mechanism
     size_t superTransactionCount;
     size_t superTransactionRetries;
