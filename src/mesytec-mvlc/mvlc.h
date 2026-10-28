@@ -61,6 +61,11 @@ struct MESYTEC_MVLC_EXPORT CmdPipeCounters
     size_t superRefMismatches;
     size_t stackRefMismatches;
 
+    // Super/stack continuation frames (0xF2/0xF6) found at the start of the
+    // buffer without a preceding 0xF1/0xF5 frame. These are dropped together
+    // with any continuations following them.
+    size_t orphanedContinuations;
+
     // New for FW0039: counters for the safe retry mechanism
     size_t superTransactionCount;
     size_t superTransactionRetries;

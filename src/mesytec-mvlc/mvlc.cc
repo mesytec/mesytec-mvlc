@@ -295,6 +295,23 @@ void cmd_pipe_reader(ReaderContext &context)
         return true;
     };
 
+    // Size of the frame starting at header including all continuation frames.
+    // Only valid if contains_complete_frame() returned true.
+    auto frame_size_with_continuations = [] (const u32 *header) -> size_t
+    {
+        auto frameInfo = extract_frame_info(*header);
+        size_t size = frameInfo.len + 1;
+
+        while (frameInfo.flags & frame_flags::Continue)
+        {
+            header += frameInfo.len + 1;
+            frameInfo = extract_frame_info(*header);
+            size += frameInfo.len + 1;
+        }
+
+        return size;
+    };
+
 #define CMD_PIPE_RECORD_DATA 0
 #define CMD_PIPE_RECORD_FILE "cmd_pipe_stream.dat"
 
@@ -378,7 +395,6 @@ void cmd_pipe_reader(ReaderContext &context)
                     ++counters.superBuffers;
 
                     auto pendingResponse = context.pendingSuper.access();
-                    size_t toConsume = 0;
                     std::error_code ec;
 
                     if (frameLength == 0)
@@ -386,13 +402,10 @@ void cmd_pipe_reader(ReaderContext &context)
                         logger->warn("cmd_pipe_reader: short super frame (0x{:08x}, consuming frame header", buffer[0]);
                         ec = make_error_code(MVLCErrorCode::ShortSuperFrame);
                         ++counters.shortSuperBuffers;
-                        toConsume = 1;
                     }
                     else
                     {
                         using namespace super_commands;
-
-                        toConsume += frameLength + 1;
 
                         u32 refCmd = buffer[1];
 
@@ -417,15 +430,7 @@ void cmd_pipe_reader(ReaderContext &context)
                         }
                     }
 
-                    const u32 *header = &buffer[0];
-                    auto frameInfo = extract_frame_info(*header);
-
-                    while (frameInfo.flags & frame_flags::Continue)
-                    {
-                        header += frameInfo.len + 1;
-                        frameInfo = extract_frame_info(*header);
-                        toConsume += frameInfo.len + 1;
-                    }
+                    const size_t toConsume = frame_size_with_continuations(buffer.begin());
 
                     if (ec)
                         fullfill_pending_response(
@@ -448,18 +453,14 @@ void cmd_pipe_reader(ReaderContext &context)
                         logger->error("cmd_pipe_reader: received stack buffer without an active stack transaction! {:#010x}", fmt::join(buffer.viewU32(), ", "));
                     }
 
-                    size_t toConsume = 0;
                     std::error_code ec;
 
                     if (get_frame_length(buffer[0]) == 0)
                     {
                         ec = make_error_code(MVLCErrorCode::StackFormatError);
-                        toConsume = 1;
                     }
                     else
                     {
-                        toConsume += get_frame_length(buffer[0]) + 1;
-
                         u32 stackRef = buffer[1];
 
                         if (stackRef != pendingResponse->reference)
@@ -472,15 +473,7 @@ void cmd_pipe_reader(ReaderContext &context)
                         }
                     }
 
-                    const u32 *header = &buffer[0];
-                    auto frameInfo = extract_frame_info(*header);
-
-                    while (frameInfo.flags & frame_flags::Continue)
-                    {
-                        header += frameInfo.len + 1;
-                        frameInfo = extract_frame_info(*header);
-                        toConsume += frameInfo.len + 1;
-                    }
+                    const size_t toConsume = frame_size_with_continuations(buffer.begin());
 
                     if (ec)
                         fullfill_pending_response(
@@ -491,14 +484,16 @@ void cmd_pipe_reader(ReaderContext &context)
 
                     buffer.consume(toConsume);
                 }
-                else if (is_known_frame_header(buffer[0]))
-                {
-                    logger->warn("cmd_pipe_reader: known but unexpected frame header: 0x{:08x}", buffer[0]);
-                }
                 else
                 {
-                    // Should not happen because of the is_good_header() check above.
-                    assert(!"cmd_pipe_reader: unknown frame in buffer");
+                    // Orphaned super/stack continuation, e.g. the start of the
+                    // response was lost. Drop it including its continuations.
+                    assert(is_super_buffer_continuation(buffer[0]) || is_stack_buffer_continuation(buffer[0]));
+                    const size_t toConsume = frame_size_with_continuations(buffer.begin());
+                    logger->warn("cmd_pipe_reader: dropping orphaned continuation frame 0x{:08x} ({} words)",
+                                 buffer[0], toConsume);
+                    ++counters.orphanedContinuations;
+                    buffer.consume(toConsume);
                 }
             }
             else
