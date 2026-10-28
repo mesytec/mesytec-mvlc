@@ -1355,7 +1355,7 @@ std::error_code CmdApi::vmeBlockReadSwapped(
     u32 stackRef = readerContext_.nextStackReference++;
 
     get_logger("mvlc")->debug("vmeBlockReadSwapped(): address=0x{:08X}, amod=0x{:02X}, maxTransfers={}, fifo={}, stackRef=0x{:08X}",
-        address, maxTransfers, amod, fifo, stackRef);
+        address, amod, maxTransfers, fifo, stackRef);
 
     StackCommandBuilder stackBuilder;
     stackBuilder.addWriteMarker(stackRef);
