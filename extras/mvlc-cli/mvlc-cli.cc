@@ -1523,10 +1523,6 @@ MVLC connection URIs:
             return 1;
         }
     }
-    else
-    {
-        spdlog::warn("no command given");
-    }
 
     assert(parser[1].empty());
 
@@ -1546,6 +1542,7 @@ MVLC connection URIs:
         return 0;
     }
 
+    spdlog::warn("no command given");
     std::cout << generalHelp;
     return 1;
 }
