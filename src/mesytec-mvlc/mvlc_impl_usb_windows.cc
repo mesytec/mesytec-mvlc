@@ -457,6 +457,9 @@ std::error_code Impl::write(Pipe pipe, const u8 *buffer, size_t size,
 
     auto ec = make_error_code(st);
 
+    logger->trace("write(): pipe={}, wrote {} of {} bytes, result={}",
+                  static_cast<unsigned>(pipe), bytesTransferred, size, ec.message());
+
     if (ec)
     {
         logger->warn("write(): pipe={}, wrote {} of {} bytes, result={}",

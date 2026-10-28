@@ -53,6 +53,8 @@ if (MVLC_BUILD_DEV_TOOLS)
         add_mvlc_usb_dev_tool(mvlc-usb-write-unanswered mvlc_usb_write_unanswered.cc)
     endif()
 
+    add_mvlc_dev_tool(mvlc-super-size-sweep mvlc_super_size_sweep.cc)
+
     add_mvlc_dev_tool(mvlc-vme-write-many mvlc_vme_write_many.cc)
     install(TARGETS mvlc-vme-write-many RUNTIME DESTINATION bin)
 
