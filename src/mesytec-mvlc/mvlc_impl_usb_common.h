@@ -13,6 +13,7 @@ namespace mesytec::mvlc::usb
 {
 
 class MESYTEC_MVLC_EXPORT Impl;
+struct Ftd3xxApi;
 
 struct DeviceInfo
 {
@@ -25,11 +26,13 @@ struct DeviceInfo
         static const u8 USB3   = 4;
     };
 
-    int index = -1;             // index value used by the FTDI lib for this device.
+    int index = -1;             // position in the unfiltered list of all FTDI devices
     std::string serial;         // usb serial number string
     std::string description;    // usb device description string
     u8 flags = 0;               // Flags bits
     void *handle = nullptr;     // FTDI handle if opened
+    int ftIndex = -1;           // index value used by ftApi for this device
+    const Ftd3xxApi *ftApi = nullptr; // FTDI library that enumerated the device
 
     inline explicit operator bool() const { return index >= 0; }
 };
@@ -54,7 +57,7 @@ enum class EndpointDirection: u8
     Out
 };
 
-std::error_code check_chip_configuration(void *handle);
+std::error_code check_chip_configuration(const Ftd3xxApi *ft, void *handle);
 std::error_code post_connect_cleanup(Impl &impl);
 
 }

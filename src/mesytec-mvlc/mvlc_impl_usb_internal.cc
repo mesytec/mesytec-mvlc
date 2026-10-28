@@ -18,7 +18,7 @@ class FTErrorCategory: public std::error_category
 
     std::string message(int ev) const override
     {
-        switch (static_cast<_FT_STATUS>(ev))
+        switch (ev)
         {
             case FT_OK:                                 return "FT_OK";
             case FT_INVALID_HANDLE:                     return "FT_INVALID_HANDLE";
@@ -27,12 +27,13 @@ class FTErrorCategory: public std::error_category
             case FT_IO_ERROR:                           return "FT_IO_ERROR";
             case FT_INSUFFICIENT_RESOURCES:             return "FT_INSUFFICIENT_RESOURCES";
             case FT_INVALID_PARAMETER: /* 6 */          return "FT_INVALID_PARAMETER";
-            case FT_INVALID_BAUD_RATE:                  return "FT_INVALID_BAUD_RATE";
-            case FT_DEVICE_NOT_OPENED_FOR_ERASE:        return "FT_DEVICE_NOT_OPENED_FOR_ERASE";
-            case FT_DEVICE_NOT_OPENED_FOR_WRITE:        return "FT_DEVICE_NOT_OPENED_FOR_WRITE";
-            case FT_FAILED_TO_WRITE_DEVICE: /* 10 */    return "FT_FAILED_TO_WRITE_DEVICE";
-            case FT_MEM_INSUFFICIENT_ERROR:             return "FT_MEM_INSUFFICIENT_ERROR";
-            case FT_OVERFLOW_ERROR:                     return "FT_OVERFLOW_ERROR";
+            // 7-12 are not defined in the 1.4.x Windows header.
+            case 7:                                     return "FT_INVALID_BAUD_RATE";
+            case 8:                                     return "FT_DEVICE_NOT_OPENED_FOR_ERASE";
+            case 9:                                     return "FT_DEVICE_NOT_OPENED_FOR_WRITE";
+            case 10:                                    return "FT_FAILED_TO_WRITE_DEVICE";
+            case 11:                                    return "FT_MEM_INSUFFICIENT_ERROR";
+            case 12:                                    return "FT_OVERFLOW_ERROR";
             case FT_INVALID_ARGS:                       return "FT_INVALID_ARGS";
             case FT_NOT_SUPPORTED:                      return "FT_NOT_SUPPORTED";
             case FT_NO_MORE_ITEMS:                      return "FT_NO_MORE_ITEMS";
@@ -60,7 +61,7 @@ class FTErrorCategory: public std::error_category
     {
         using mesytec::mvlc::ErrorType;
 
-        switch (static_cast<_FT_STATUS>(ev))
+        switch (ev)
         {
             case FT_OK:
                 return ErrorType::Success;
@@ -74,12 +75,7 @@ class FTErrorCategory: public std::error_category
             case FT_IO_ERROR:
             case FT_INSUFFICIENT_RESOURCES:
             case FT_INVALID_PARAMETER:
-            case FT_INVALID_BAUD_RATE:
-            case FT_DEVICE_NOT_OPENED_FOR_ERASE:
-            case FT_DEVICE_NOT_OPENED_FOR_WRITE:
-            case FT_FAILED_TO_WRITE_DEVICE:
-            case FT_MEM_INSUFFICIENT_ERROR:
-            case FT_OVERFLOW_ERROR:
+            case 7: case 8: case 9: case 10: case 11: case 12:
             case FT_INVALID_ARGS:
             case FT_NOT_SUPPORTED:
             case FT_NO_MORE_ITEMS:

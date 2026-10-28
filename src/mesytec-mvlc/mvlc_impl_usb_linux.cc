@@ -86,7 +86,7 @@ std::error_code Impl::closeHandle()
 
     if (m_handle)
     {
-        st = FT_Close(m_handle);
+        st = m_ft->Close(m_handle);
         m_handle = nullptr;
         // libftd3xx arms alarm(5) in streaming FT_ReadPipe() and leaves it
         // armed if the read fails. The SIGALRM handler uses the closed handle.
@@ -122,7 +122,7 @@ std::error_code Impl::connect()
                         if (!infoList.empty())
                         {
                             m_deviceInfo = infoList[0];
-                            auto st = FT_Create(reinterpret_cast<void *>(m_deviceInfo.index),
+                            auto st = m_deviceInfo.ftApi->Create(reinterpret_cast<void *>(m_deviceInfo.ftIndex),
                                                 FT_OPEN_BY_INDEX, &m_handle);
                             ec = make_error_code(st);
                         }
@@ -142,7 +142,7 @@ std::error_code Impl::connect()
                             if (info.index == static_cast<int>(connectMode.index))
                             {
                                 m_deviceInfo = info;
-                                auto st = FT_Create(reinterpret_cast<void *>(m_deviceInfo.index),
+                                auto st = m_deviceInfo.ftApi->Create(reinterpret_cast<void *>(m_deviceInfo.ftIndex),
                                                     FT_OPEN_BY_INDEX, &m_handle);
                                 ec = make_error_code(st);
                                 break;
@@ -157,7 +157,7 @@ std::error_code Impl::connect()
 
                         if ((m_deviceInfo = get_device_info_by_serial(infoList, connectMode.serial)))
                         {
-                            auto st = FT_Create(reinterpret_cast<void *>(m_deviceInfo.index),
+                            auto st = m_deviceInfo.ftApi->Create(reinterpret_cast<void *>(m_deviceInfo.ftIndex),
                                                 FT_OPEN_BY_INDEX, &m_handle);
                             ec = make_error_code(st);
                         }
@@ -166,7 +166,10 @@ std::error_code Impl::connect()
             }
 
             if (!ec)
+            {
+                m_ft = m_deviceInfo.ftApi;
                 break;
+            }
         }
 
         return ec;
@@ -177,7 +180,7 @@ std::error_code Impl::connect()
         for (auto &readBuffer: m_readBuffers)
             readBuffer.clear();
 
-        if (auto ec = check_chip_configuration(m_handle))
+        if (auto ec = check_chip_configuration(m_ft, m_handle))
         {
             closeHandle();
             return ec;
@@ -190,7 +193,7 @@ std::error_code Impl::connect()
         for (auto pipe: { Pipe::Command, Pipe::Data})
         {
             if (auto ec = set_endpoint_timeout(
-                    m_handle, get_endpoint(pipe, EndpointDirection::In),
+                    m_ft, m_handle, get_endpoint(pipe, EndpointDirection::In),
                     ReadTimeout_ms))
             {
                 closeHandle();
@@ -198,7 +201,7 @@ std::error_code Impl::connect()
             }
 
             if (auto ec = set_endpoint_timeout(
-                    m_handle, get_endpoint(pipe, EndpointDirection::Out),
+                    m_ft, m_handle, get_endpoint(pipe, EndpointDirection::Out),
                     WriteTimeout_ms))
             {
                 closeHandle();
@@ -210,7 +213,7 @@ std::error_code Impl::connect()
 
         // Without streaming mode FT_ReadPipe() only returns once the full
         // requested size has been read or the timeout expires.
-        if (auto ec = make_error_code(FT_SetStreamPipe(m_handle, false, true, 0, USBStreamPipeReadSize)))
+        if (auto ec = make_error_code(m_ft->SetStreamPipe(m_handle, false, true, 0, USBStreamPipeReadSize)))
         {
             logger->error("FT_SetStreamPipe failed: {}", ec.message());
             closeHandle();
@@ -231,7 +234,7 @@ std::error_code Impl::connect()
         auto &readBuffer = m_readBuffers[static_cast<unsigned>(pipe)];
         ULONG transferred = 0;
 
-        FT_STATUS st = FT_ReadPipe(
+        FT_STATUS st = m_ft->ReadPipe(
             m_handle, get_endpoint(pipe, EndpointDirection::In),
             readBuffer.data.data(), readBuffer.capacity(),
             &transferred, ProbeReadTimeout_ms);
@@ -262,7 +265,7 @@ std::error_code Impl::connect()
         logger->warn("USB IN endpoint in error state, resetting the device port");
 
         // The device re-enumerates after the reset. Reopen it by serial.
-        FT_ResetDevicePort(m_handle);
+        m_ft->ResetDevicePort(m_handle);
         closeHandle();
 
         const ConnectMode bySerial{ConnectMode::BySerial, 0, m_deviceInfo.serial};
@@ -349,7 +352,7 @@ std::error_code Impl::write(Pipe pipe, const u8 *buffer, size_t size,
 
     ULONG transferred = 0; // FT API needs a ULONG*
 
-    FT_STATUS st = FT_WritePipeEx(m_handle, get_fifo_id(pipe),
+    FT_STATUS st = m_ft->WritePipeEx(m_handle, get_fifo_id(pipe),
                                   const_cast<u8 *>(buffer), size,
                                   &transferred,
                                   WriteTimeout_ms);
@@ -420,7 +423,7 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
     const size_t readSize = pipe == Pipe::Command ? maxPacketSize : readBuffer.capacity();
     ULONG transferred = 0; // FT API wants a ULONG* parameter
 
-    FT_STATUS st = FT_ReadPipe(
+    FT_STATUS st = m_ft->ReadPipe(
         m_handle,
         get_endpoint(pipe, EndpointDirection::In),
         readBuffer.data.data(),
@@ -463,7 +466,7 @@ std::error_code Impl::read_unbuffered(Pipe pipe, u8 *buffer, size_t size,
     ULONG transferred = 0; // FT API wants a ULONG* parameter
     std::error_code ec = {};
 
-    FT_STATUS st = FT_ReadPipe(
+    FT_STATUS st = m_ft->ReadPipe(
         m_handle, get_endpoint(pipe, EndpointDirection::In),
         buffer, size,
         &transferred,
@@ -498,9 +501,9 @@ std::string Impl::connectionInfo() const
     return result;
 }
 
-std::error_code set_endpoint_timeout(void *handle, u8 ep, unsigned ms)
+std::error_code set_endpoint_timeout(const Ftd3xxApi *ft, void *handle, u8 ep, unsigned ms)
 {
-    FT_STATUS st = FT_SetPipeTimeout(handle, ep, ms);
+    FT_STATUS st = ft->SetPipeTimeout(handle, ep, ms);
     return mesytec::mvlc::usb::make_error_code(st);
 }
 

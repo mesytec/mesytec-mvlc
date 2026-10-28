@@ -25,7 +25,7 @@
 # No x86 (32-bit) slot — neither mesytec-mvlc nor mvme build 32-bit.
 #
 # Windows ships BOTH driver architectures side by side and picks between
-# them at process startup (see ftd3xx_dual_loader.hpp) — mesytec-mvlc never
+# them at runtime (see src/mesytec-mvlc/ftd3xx_api.cc) — mesytec-mvlc never
 # links against FTD3XX.lib / FTD3XXWU.lib on Windows. It only needs the
 # header (either package's FTD3XX.h — identical per FTDI's compat notice)
 # and both DLLs present next to the executable, loaded via

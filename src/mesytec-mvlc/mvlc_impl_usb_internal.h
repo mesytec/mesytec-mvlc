@@ -2,7 +2,7 @@
 #define A713E15B_D034_4E5A_A532_5DDEF3CA3C27
 
 #include <system_error>
-#include <ftd3xx.h>
+#include "ftd3xx_api.h"
 #include "mvlc_impl_usb.h"
 #include "util/logging.h"
 

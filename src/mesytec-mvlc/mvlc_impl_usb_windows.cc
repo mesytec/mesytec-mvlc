@@ -90,7 +90,7 @@ std::pair<std::error_code, size_t> read_pipe_until_empty(
 };
 
 #ifdef MESYTEC_MVLC_PLATFORM_WINDOWS
-std::error_code abort_pipe(void *ftdiHandle, Pipe pipe, mesytec::mvlc::usb::EndpointDirection dir)
+std::error_code abort_pipe(const usb::Ftd3xxApi *ft, void *ftdiHandle, Pipe pipe, mesytec::mvlc::usb::EndpointDirection dir)
 {
     auto logger = get_logger("mvlc_usb");
 
@@ -99,7 +99,7 @@ std::error_code abort_pipe(void *ftdiHandle, Pipe pipe, mesytec::mvlc::usb::Endp
         static_cast<unsigned>(pipe),
         static_cast<unsigned>(dir));
 
-    auto st = FT_AbortPipe(ftdiHandle, get_endpoint(pipe, dir));
+    auto st = ft->AbortPipe(ftdiHandle, get_endpoint(pipe, dir));
 
     if (auto ec = mesytec::mvlc::usb::make_error_code(st))
     {
@@ -158,7 +158,7 @@ std::error_code Impl::closeHandle()
 
     if (m_handle)
     {
-        st = FT_Close(m_handle);
+        st = m_ft->Close(m_handle);
         m_handle = nullptr;
     }
 
@@ -192,7 +192,7 @@ std::error_code Impl::connect()
                     if (!infoList.empty())
                     {
                         m_deviceInfo = infoList[0];
-                        st = FT_Create(reinterpret_cast<void *>(m_deviceInfo.index),
+                        st = m_deviceInfo.ftApi->Create(reinterpret_cast<void *>(m_deviceInfo.ftIndex),
                                        FT_OPEN_BY_INDEX, &m_handle);
                     }
                 }
@@ -207,7 +207,7 @@ std::error_code Impl::connect()
                         if (info.index == static_cast<int>(m_connectMode.index))
                         {
                             m_deviceInfo = info;
-                            st = FT_Create(reinterpret_cast<void *>(m_deviceInfo.index),
+                            st = m_deviceInfo.ftApi->Create(reinterpret_cast<void *>(m_deviceInfo.ftIndex),
                                            FT_OPEN_BY_INDEX, &m_handle);
                             break;
                         }
@@ -221,7 +221,7 @@ std::error_code Impl::connect()
 
                     if ((m_deviceInfo = get_device_info_by_serial(infoList, m_connectMode.serial)))
                     {
-                        st = FT_Create(reinterpret_cast<void *>(m_deviceInfo.index),
+                        st = m_deviceInfo.ftApi->Create(reinterpret_cast<void *>(m_deviceInfo.ftIndex),
                                        FT_OPEN_BY_INDEX, &m_handle);
                     }
                 }
@@ -239,7 +239,11 @@ std::error_code Impl::connect()
     if (ec)
         return ec;
 
-    if (auto ec = check_chip_configuration(m_handle))
+    m_ft = m_deviceInfo.ftApi;
+
+    logger->info("using {} for device {}", m_ft->name, m_deviceInfo.serial);
+
+    if (auto ec = check_chip_configuration(m_ft, m_handle))
     {
         closeHandle();
         return ec;
@@ -254,7 +258,7 @@ std::error_code Impl::connect()
     for (auto pipe: { Pipe::Command, Pipe::Data})
     {
         if (auto ec = set_endpoint_timeout(
-                m_handle, get_endpoint(pipe, EndpointDirection::In),
+                m_ft, m_handle, get_endpoint(pipe, EndpointDirection::In),
                 ReadTimeout_ms))
         {
             closeHandle();
@@ -262,7 +266,7 @@ std::error_code Impl::connect()
         }
 
         if (auto ec = set_endpoint_timeout(
-                m_handle, get_endpoint(pipe, EndpointDirection::Out),
+                m_ft, m_handle, get_endpoint(pipe, EndpointDirection::Out),
                 WriteTimeout_ms))
         {
             closeHandle();
@@ -278,7 +282,7 @@ std::error_code Impl::connect()
     {
         for (auto dir: { EndpointDirection::In, EndpointDirection::Out })
         {
-            if (auto ec = abort_pipe(m_handle, pipe, dir))
+            if (auto ec = abort_pipe(m_ft, m_handle, pipe, dir))
             {
                 closeHandle();
                 return ec;
@@ -292,7 +296,7 @@ std::error_code Impl::connect()
 #if USB_WIN_USE_STREAMPIPE
     logger->trace("enabling streaming mode for all read pipes, size={}", USBStreamPipeReadSize);
     // FT_SetStreamPipe(handle, allWritePipes, allReadPipes, pipeID, streamSize)
-    st = FT_SetStreamPipe(m_handle, false, true, 0, USBStreamPipeReadSize);
+    st = m_ft->SetStreamPipe(m_handle, false, true, 0, USBStreamPipeReadSize);
 
     if (auto ec = make_error_code(st))
     {
@@ -325,7 +329,7 @@ std::error_code Impl::connect()
     // Linux only: after post_connect_cleanup() is done set the command pipes
     // read timeout to 0 which has the effect of only reading from the FTDI
     // library buffer.
-    if (auto ec = set_endpoint_timeout(m_handle, get_endpoint(Pipe::Command, EndpointDirection::In), 0))
+    if (auto ec = set_endpoint_timeout(m_ft, m_handle, get_endpoint(Pipe::Command, EndpointDirection::In), 0))
     {
         closeHandle();
         return ec;
@@ -384,7 +388,7 @@ std::error_code Impl::write(Pipe pipe, const u8 *buffer, size_t size,
     {
         logger->trace("write(): sync write (Ex variant), attempt {}/{}", writeAttempt+1, MaxWriteAttempts);
 
-        st = FT_WritePipeEx(
+        st = m_ft->WritePipeEx(
             m_handle, get_endpoint(pipe, EndpointDirection::Out),
             const_cast<u8 *>(buffer), size,
             &transferred,
@@ -392,7 +396,7 @@ std::error_code Impl::write(Pipe pipe, const u8 *buffer, size_t size,
 
         if (st != FT_OK && st != FT_IO_PENDING)
         {
-            if (auto ec = abort_pipe(m_handle, pipe, EndpointDirection::Out))
+            if (auto ec = abort_pipe(m_ft, m_handle, pipe, EndpointDirection::Out))
                 return ec;
         }
 
@@ -406,7 +410,7 @@ std::error_code Impl::write(Pipe pipe, const u8 *buffer, size_t size,
 
 #else // !USB_WIN_USE_EX_FUNCTIONS
     logger->trace("sync write");
-    FT_STATUS st = FT_WritePipe(
+    FT_STATUS st = m_ft->WritePipe(
         m_handle, get_endpoint(pipe, EndpointDirection::Out),
         const_cast<u8 *>(buffer), size,
         &transferred,
@@ -432,14 +436,14 @@ std::error_code Impl::write(Pipe pipe, const u8 *buffer, size_t size,
         //    return ec;
         //}
 
-        st = FT_WritePipe(
+        st = m_ft->WritePipe(
             m_handle, get_endpoint(pipe, EndpointDirection::Out),
             const_cast<u8 *>(buffer), size,
             &transferred,
             &vOverlapped);
 
         if (st == FT_IO_PENDING)
-            st = FT_GetOverlappedResult(m_handle, &vOverlapped, &transferred, true);
+            st = m_ft->GetOverlappedResult(m_handle, &vOverlapped, &transferred, true);
 
         CloseHandle(vOverlapped.hEvent);
         //FT_ReleaseOverlapped(m_handle, &vOverlapped);
@@ -447,7 +451,7 @@ std::error_code Impl::write(Pipe pipe, const u8 *buffer, size_t size,
 #endif // USB_WIN_USE_ASYNC
 
     if (st != FT_OK && st != FT_IO_PENDING)
-        abort_pipe(m_handle, pipe, EndpointDirection::Out);
+        abort_pipe(m_ft, m_handle, pipe, EndpointDirection::Out);
 
     bytesTransferred = transferred;
 
@@ -480,7 +484,7 @@ std::error_code Impl::write(Pipe pipe, const u8 *buffer, size_t size,
 
     ULONG transferred = 0; // FT API needs a ULONG*
 
-    FT_STATUS st = FT_WritePipeEx(m_handle, get_fifo_id(pipe),
+    FT_STATUS st = m_ft->WritePipeEx(m_handle, get_fifo_id(pipe),
                                   const_cast<u8 *>(buffer), size,
                                   &transferred,
                                   WriteTimeout_ms);
@@ -584,7 +588,7 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
 #if USB_WIN_USE_EX_FUNCTIONS
     logger->trace("read(): sync read (Ex variant)");
 
-    FT_STATUS st = FT_ReadPipeEx(
+    FT_STATUS st = m_ft->ReadPipeEx(
         m_handle, get_endpoint(pipe, EndpointDirection::In),
         readBuffer.data.data(),
         readBuffer.capacity(),
@@ -593,7 +597,7 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
 #else // !USB_WIN_USE_EX_FUNCTIONS
     logger->trace("sync read");
 
-    FT_STATUS st = FT_ReadPipe(
+    FT_STATUS st = m_ft->ReadPipe(
         m_handle, get_endpoint(pipe, EndpointDirection::In),
         readBuffer.data.data(),
         readBuffer.capacity(),
@@ -617,7 +621,7 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
         //    return ec;
         //}
 
-        st = FT_ReadPipe(
+        st = m_ft->ReadPipe(
             m_handle, get_endpoint(pipe, EndpointDirection::In),
             readBuffer.data.data(),
             readBuffer.capacity(),
@@ -625,7 +629,7 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
             &vOverlapped);
 
         if (st == FT_IO_PENDING)
-            st = FT_GetOverlappedResult(m_handle, &vOverlapped, &transferred, true);
+            st = m_ft->GetOverlappedResult(m_handle, &vOverlapped, &transferred, true);
 
         CloseHandle(vOverlapped.hEvent);
         //FT_ReleaseOverlapped(m_handle, &vOverlapped);
@@ -633,7 +637,7 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
 #endif // USB_WIN_USE_ASYNC
 
     if (st != FT_OK && st != FT_IO_PENDING)
-        abort_pipe(m_handle, pipe, EndpointDirection::In);
+        abort_pipe(m_ft, m_handle, pipe, EndpointDirection::In);
 
     auto ec = make_error_code(st);
 
@@ -693,7 +697,7 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
         // Possible fix for USB2 CommandTimeout issues with older USB chipsets:
         // explicitly specify a read timeout here.
         // -> Makes USB communication very slow.
-        st = FT_ReadPipeEx(
+        st = m_ft->ReadPipeEx(
             m_handle,
             get_fifo_id(pipe),
             buffer, size,
@@ -704,14 +708,14 @@ std::error_code Impl::read(Pipe pipe, u8 *buffer, size_t size,
 //#else
     {
         #ifdef __x86_64__
-        st = FT_ReadPipe(
+        st = m_ft->ReadPipe(
             m_handle,
             get_endpoint(pipe, EndpointDirection::In),
             buffer, size,
             &transferred,
             nullptr);
         #else
-        st = FT_ReadPipe(
+        st = m_ft->ReadPipe(
             m_handle,
             get_endpoint(pipe, EndpointDirection::In),
             buffer, size,
@@ -764,13 +768,13 @@ std::error_code Impl::read_unbuffered(Pipe pipe, u8 *buffer, size_t size,
 #endif
 
 #if USB_WIN_USE_EX_FUNCTIONS
-    FT_STATUS st = FT_ReadPipeEx(
+    FT_STATUS st = m_ft->ReadPipeEx(
         m_handle, get_endpoint(pipe, EndpointDirection::In),
         buffer, size,
         &transferred,
         nullptr);
 #else // !USB_WIN_USE_EX_FUNCTIONS
-    FT_STATUS st = FT_ReadPipe(
+    FT_STATUS st = m_ft->ReadPipe(
         m_handle, get_endpoint(pipe, EndpointDirection::In),
         buffer, size,
         &transferred,
@@ -793,14 +797,14 @@ std::error_code Impl::read_unbuffered(Pipe pipe, u8 *buffer, size_t size,
         //    return ec;
         //}
 
-        st = FT_ReadPipe(
+        st = m_ft->ReadPipe(
             m_handle, get_endpoint(pipe, EndpointDirection::In),
             buffer, size,
             &transferred,
             &vOverlapped);
 
         if (st == FT_IO_PENDING)
-            st = FT_GetOverlappedResult(m_handle, &vOverlapped, &transferred, true);
+            st = m_ft->GetOverlappedResult(m_handle, &vOverlapped, &transferred, true);
 
         CloseHandle(vOverlapped.hEvent);
         //FT_ReleaseOverlapped(m_handle, &vOverlapped);
@@ -812,17 +816,17 @@ std::error_code Impl::read_unbuffered(Pipe pipe, u8 *buffer, size_t size,
               static_cast<unsigned>(pipe), size, make_error_code(st).message().c_str());
 
     if (st != FT_OK && st != FT_IO_PENDING)
-        abort_pipe(m_handle, pipe, EndpointDirection::In);
+        abort_pipe(m_ft, m_handle, pipe, EndpointDirection::In);
 
 #else // linux
     #ifdef __x86_64__
-    FT_STATUS st = FT_ReadPipe(
+    FT_STATUS st = m_ft->ReadPipe(
         m_handle, get_endpoint(pipe, EndpointDirection::In),
         buffer, size,
         &transferred,
         nullptr);
     #else
-    FT_STATUS st = FT_ReadPipe(
+    FT_STATUS st = m_ft->ReadPipe(
         m_handle, get_endpoint(pipe, EndpointDirection::In),
         buffer, size,
         &transferred,
@@ -859,9 +863,9 @@ std::string Impl::connectionInfo() const
     return result;
 }
 
-std::error_code set_endpoint_timeout(void *handle, u8 ep, unsigned ms)
+std::error_code set_endpoint_timeout(const Ftd3xxApi *ft, void *handle, u8 ep, unsigned ms)
 {
-    FT_STATUS st = FT_SetPipeTimeout(handle, ep, ms);
+    FT_STATUS st = ft->SetPipeTimeout(handle, ep, ms);
     return mesytec::mvlc::usb::make_error_code(st);
 }
 

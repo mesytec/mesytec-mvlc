@@ -1,5 +1,5 @@
 #include "gtest/gtest.h"
-#include <ftd3xx.h>
+#include <mesytec-mvlc/ftd3xx_api.h>
 #include <mesytec-mvlc/mesytec-mvlc.h>
 #include <mesytec-mvlc/mvlc_impl_usb.h>
 
@@ -53,7 +53,7 @@ TEST(MvlcUsb, GetFtdiDriverVersions)
 
     DWORD driverVersionValue = {};
 
-    if (auto ftSt = FT_GetDriverVersion(ftHandle, &driverVersionValue))
+    if (auto ftSt = mvlc.getFtApi()->GetDriverVersion(ftHandle, &driverVersionValue))
     {
         spdlog::error("FT_GetDriverVersion() returned {}", ftSt);
         ASSERT_EQ(ftSt, FT_OK);
@@ -65,7 +65,7 @@ TEST(MvlcUsb, GetFtdiDriverVersions)
 
     DWORD libraryVersionValue;
 
-    if (auto ftSt = FT_GetLibraryVersion(&libraryVersionValue))
+    if (auto ftSt = mvlc.getFtApi()->GetLibraryVersion(&libraryVersionValue))
     {
         spdlog::error("FT_GetLibraryVersion() returned {}", ftSt);
         ASSERT_EQ(ftSt, FT_OK);
@@ -110,7 +110,7 @@ TEST(MvlcUsb, ReadRegister)
         // just reads in a loop.
 
 #ifdef __linux__
-        auto ec = usb::set_endpoint_timeout(mvlc.getHandle(), usb::get_endpoint(Pipe::Command, usb::EndpointDirection::In), 1000);
+        auto ec = usb::set_endpoint_timeout(mvlc.getFtApi(), mvlc.getHandle(), usb::get_endpoint(Pipe::Command, usb::EndpointDirection::In), 1000);
         ASSERT_FALSE(ec) << ec.message();
 #endif
 

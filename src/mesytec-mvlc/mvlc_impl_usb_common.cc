@@ -11,7 +11,8 @@
 namespace
 {
 
-// Returns an unfiltered list of all connected FT60X devices. */
+// Returns an unfiltered list of all connected FT60X devices from all
+// available FTDI libraries.
 mesytec::mvlc::usb::DeviceInfoList make_device_info_list()
 {
     using mesytec::mvlc::usb::DeviceInfoList;
@@ -19,39 +20,42 @@ mesytec::mvlc::usb::DeviceInfoList make_device_info_list()
 
     DeviceInfoList result;
 
-    DWORD numDevs = 0;
-    FT_STATUS st = FT_CreateDeviceInfoList(&numDevs);
-
-    if (st == FT_OK && numDevs > 0)
+    for (auto ft: mesytec::mvlc::usb::ftd3xx_apis())
     {
+        DWORD numDevs = 0;
+        FT_STATUS st = ft->CreateDeviceInfoList(&numDevs);
+
+        if (st != FT_OK || numDevs == 0)
+            continue;
+
         auto ftInfoNodes = std::make_unique<FT_DEVICE_LIST_INFO_NODE[]>(numDevs);
-        st = FT_GetDeviceInfoList(ftInfoNodes.get(), &numDevs);
+        st = ft->GetDeviceInfoList(ftInfoNodes.get(), &numDevs);
 
-        if (st == FT_OK)
+        if (st != FT_OK)
+            continue;
+
+        for (DWORD ftIndex = 0; ftIndex < numDevs; ftIndex++)
         {
-            result.reserve(numDevs);
+            const auto &infoNode = ftInfoNodes[ftIndex];
+            DeviceInfo di = {};
+            di.index = static_cast<int>(result.size());
+            di.ftIndex = ftIndex;
+            di.ftApi = ft;
+            di.serial = infoNode.SerialNumber;
+            di.description = infoNode.Description;
 
-            for (DWORD ftIndex = 0; ftIndex < numDevs; ftIndex++)
-            {
-                const auto &infoNode = ftInfoNodes[ftIndex];
-                DeviceInfo di = {};
-                di.index = ftIndex;
-                di.serial = infoNode.SerialNumber;
-                di.description = infoNode.Description;
+            if (infoNode.Flags & FT_FLAGS_OPENED)
+                di.flags |= DeviceInfo::Flags::Opened;
 
-                if (infoNode.Flags & FT_FLAGS_OPENED)
-                    di.flags |= DeviceInfo::Flags::Opened;
+            if (infoNode.Flags & FT_FLAGS_HISPEED)
+                di.flags |= DeviceInfo::Flags::USB2;
 
-                if (infoNode.Flags & FT_FLAGS_HISPEED)
-                    di.flags |= DeviceInfo::Flags::USB2;
+            if (infoNode.Flags & FT_FLAGS_SUPERSPEED)
+                di.flags |= DeviceInfo::Flags::USB3;
 
-                if (infoNode.Flags & FT_FLAGS_SUPERSPEED)
-                    di.flags |= DeviceInfo::Flags::USB3;
+            di.handle = infoNode.ftHandle;
 
-                di.handle = infoNode.ftHandle;
-
-                result.emplace_back(di);
-            }
+            result.emplace_back(di);
         }
     }
 
@@ -98,32 +102,6 @@ std::pair<std::error_code, size_t> read_pipe_until_empty(
 namespace mesytec::mvlc::usb
 {
 
-#ifdef __WIN32
-std::error_code abort_pipe(void *ftdiHandle, Pipe pipe, mesytec::mvlc::usb::EndpointDirection dir)
-{
-    auto logger = get_logger("mvlc_usb");
-
-    logger->trace(
-        "FT_AbortPipe on pipe={}, dir={}",
-        static_cast<unsigned>(pipe),
-        static_cast<unsigned>(dir));
-
-    auto st = FT_AbortPipe(ftdiHandle, get_endpoint(pipe, dir));
-
-    if (auto ec = mesytec::mvlc::usb::make_error_code(st))
-    {
-        logger->warn(
-            "FT_AbortPipe on pipe={}, dir={} returned an error: {}",
-            static_cast<unsigned>(pipe),
-            static_cast<unsigned>(dir),
-            ec.message().c_str());
-        return ec;
-    }
-    return {};
-}
-#endif // __WIN32
-
-
 DeviceInfoList get_device_info_list(const ListOptions opts)
 {
     auto result = make_device_info_list();
@@ -152,11 +130,11 @@ DeviceInfo get_device_info_by_serial(const DeviceInfoList &infoList, const std::
     return it != infoList.end() ? *it : DeviceInfo{};
 }
 
-std::error_code check_chip_configuration(void *handle)
+std::error_code check_chip_configuration(const Ftd3xxApi *ft, void *handle)
 {
     FT_60XCONFIGURATION conf = {};
 
-    FT_STATUS st = FT_GetChipConfiguration(handle, &conf);
+    FT_STATUS st = ft->GetChipConfiguration(handle, &conf);
 
     if (st != FT_OK)
         return make_error_code(st);
