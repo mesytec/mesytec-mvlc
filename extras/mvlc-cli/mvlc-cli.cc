@@ -1274,8 +1274,15 @@ DEF_EXEC_FUNC(show_usb_devices)
 
     for (const auto &devInfo: allDevices)
     {
-        std::cout << fmt::format("index={}, serial='{}', description='{}'", devInfo.index,
-                                 devInfo.serial, devInfo.description);
+        const char *speed = "unknown";
+
+        if (devInfo.flags & usb::DeviceInfo::Flags::USB3)
+            speed = "USB3";
+        else if (devInfo.flags & usb::DeviceInfo::Flags::USB2)
+            speed = "USB2";
+
+        std::cout << fmt::format("index={}, serial='{}', description='{}', speed={}",
+                                 devInfo.index, devInfo.serial, devInfo.description, speed);
 
         if (util::contains(devInfo.description, "MVLC"))
         {
