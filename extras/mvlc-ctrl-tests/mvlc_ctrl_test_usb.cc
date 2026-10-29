@@ -5,6 +5,14 @@
 
 using namespace mesytec::mvlc;
 
+// Uses the MVLC given by MVLC_TEST_USB_SERIAL or the first one found.
+std::unique_ptr<usb::Impl> make_test_impl()
+{
+    if (auto serial = util::get_env_variable("MVLC_TEST_USB_SERIAL"); serial && !serial->empty())
+        return std::make_unique<usb::Impl>(*serial);
+    return std::make_unique<usb::Impl>();
+}
+
 TEST(MvlcUsb, ConnectToFirstDevice)
 {
     spdlog::set_level(spdlog::level::trace);
@@ -43,7 +51,8 @@ TEST(MvlcUsb, GetFtdiDriverVersions)
 {
     spdlog::set_level(spdlog::level::trace);
     // TODO: move this into a setUp routine
-    usb::Impl mvlc;
+    auto impl = make_test_impl();
+    auto &mvlc = *impl;
     auto ec = mvlc.connect();
     ASSERT_FALSE(ec) << ec.message();
     ASSERT_TRUE(mvlc.isConnected());
@@ -80,7 +89,8 @@ TEST(MvlcUsb, ReadRegister)
 {
     spdlog::set_level(spdlog::level::trace);
     // TODO: move this into a setUp routine
-    usb::Impl mvlc;
+    auto impl = make_test_impl();
+    auto &mvlc = *impl;
     auto ec = mvlc.connect();
     ASSERT_FALSE(ec) << ec.message();
     ASSERT_TRUE(mvlc.isConnected());

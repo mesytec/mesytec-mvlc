@@ -22,8 +22,18 @@ class MVLCTestBase: public ::testing::TestWithParam<const char *>
 
             if (mvlcType == "usb")
             {
-                spdlog::info("MVLCTestBase using MVLC_USB");
-                mvlc = make_mvlc_usb();
+                auto serial = util::get_env_variable("MVLC_TEST_USB_SERIAL");
+
+                if (serial && !serial->empty())
+                {
+                    spdlog::info("MVLCTestBase using MVLC_USB (serial={})", *serial);
+                    mvlc = make_mvlc_usb(*serial);
+                }
+                else
+                {
+                    spdlog::info("MVLCTestBase using the first MVLC_USB. Set MVLC_TEST_USB_SERIAL to select a device.");
+                    mvlc = make_mvlc_usb();
+                }
             }
             else if (mvlcType == "eth")
             {
