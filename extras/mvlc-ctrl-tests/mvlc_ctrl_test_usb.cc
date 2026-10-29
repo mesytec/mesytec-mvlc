@@ -13,10 +13,11 @@ std::unique_ptr<usb::Impl> make_test_impl()
     return std::make_unique<usb::Impl>();
 }
 
-TEST(MvlcUsb, ConnectToFirstDevice)
+TEST(MvlcUsb, Connect)
 {
     spdlog::set_level(spdlog::level::trace);
-    usb::Impl mvlc;
+    auto impl = make_test_impl();
+    auto &mvlc = *impl;
 
     ASSERT_EQ(mvlc.connectionType(), ConnectionType::USB);
 

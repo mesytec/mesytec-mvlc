@@ -9,7 +9,9 @@ int main(int argc, char *argv[])
 {
     spdlog::set_level(spdlog::level::trace);
     // TODO: move this into a setUp routine
-    usb::Impl mvlc;
+    auto serial = util::get_env_variable("MVLC_TEST_USB_SERIAL");
+    auto impl = serial && !serial->empty() ? std::make_unique<usb::Impl>(*serial) : std::make_unique<usb::Impl>();
+    auto &mvlc = *impl;
     auto ec = mvlc.connect();
     assert(!ec);
     assert(mvlc.isConnected());
