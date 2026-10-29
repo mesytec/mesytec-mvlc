@@ -1,5 +1,6 @@
 #include "udp_sockets.h"
 #include "logging.h"
+#include "mesytec-mvlc/mvlc_error.h"
 
 #ifndef MESYTEC_MVLC_PLATFORM_WINDOWS
     #include <netdb.h>
@@ -37,7 +38,7 @@ static const unsigned DefaultReadTimeout_ms  = 500;
 // Standard MTU is 1500 bytes
 // IPv4 header is 20 bytes
 // UDP header is 8 bytes
-[[maybe_unused]] static const size_t MaxPayloadSize = 1500 - 20 - 8;
+static const size_t MaxPayloadSize = 1500 - 20 - 8;
 
 static bool socketSystemInitialized = false;
 
@@ -319,17 +320,18 @@ std::error_code close_socket(int sock)
 // Note: it is not necessary to split writes into multiple calls to send()
 // because outgoing MVLC command buffers have to be smaller than the maximum,
 // non-jumbo ethernet MTU.
-// The send() call should return EMSGSIZE if the payload is too large to be
-// atomically transmitted.
+// Larger payloads are not rejected by send() but IP-fragmented, which the MVLC
+// does not handle. They are refused with UdpMaxOutgoingPacketSizeExceeded.
 #ifdef MESYTEC_MVLC_PLATFORM_WINDOWS
 std::error_code write_to_socket(
     int socket, const u8 *buffer, size_t size, size_t &bytesTransferred)//, int timeout_ms)
 {
-    assert(size <= MaxPayloadSize);
+    bytesTransferred = 0;
+
+    if (size > MaxPayloadSize)
+        return make_error_code(MVLCErrorCode::UdpMaxOutgoingPacketSizeExceeded);
 
     init_socket_system();
-
-    bytesTransferred = 0;
 
     s64 res = ::send(socket, reinterpret_cast<const char *>(buffer), size, 0);
 
@@ -352,9 +354,10 @@ std::error_code write_to_socket(
 std::error_code write_to_socket(
     int socket, const u8 *buffer, size_t size, size_t &bytesTransferred)
 {
-    assert(size <= MaxPayloadSize);
-
     bytesTransferred = 0;
+
+    if (size > MaxPayloadSize)
+        return make_error_code(MVLCErrorCode::UdpMaxOutgoingPacketSizeExceeded);
 
     ssize_t res = ::send(socket, reinterpret_cast<const char *>(buffer), size, 0);
 

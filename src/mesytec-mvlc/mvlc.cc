@@ -995,13 +995,14 @@ std::error_code CmdApi::uploadStack(
     //
     // Limits for the number of stack words that can be uploaded in a single
     // super transaction:
-    // ETH is limited by the non-jumbo UDP max payload size. Using 181 stack
-    // words per part results in 1+181*2=362 super words (reference word +
+    // ETH is limited by the non-jumbo UDP max payload size. Using 180 stack
+    // words per part results in 1+180*2=361 super words (reference word +
     // (write command + payload) for each stack part. If the part is the first
     // and/or last part, StackStart and/or StackEnd also have to be written.
-    // Extreme case without ref word: StackStart + 181 words + StackEnd = 183 words.
-    // With WriteLocal commands: 183 * 2 + 1 ref word: 367 words * 4 bytes = 1468 bytes.
-    static const size_t EthPartMaxSize = 181;
+    // Extreme case without ref word: StackStart + 180 words + StackEnd = 182 words.
+    // With WriteLocal commands: 182 * 2 + 1 ref word + CmdBufferStart/End:
+    // 367 words * 4 bytes = 1468 bytes, max UDP payload is 1472 bytes.
+    static const size_t EthPartMaxSize = 180;
 
     // USB is theoretically unlimited but there are issues with large buffers
     // (FW0036_11 and earlier): the super response from the MVLC is missing
