@@ -875,15 +875,15 @@ std::error_code CmdApi::stackTransaction(
                 ++readerContext_.counters.access()->stackExecRequestsLost;
             }
 
-            // Also read the new parse_error_counter register and output it.
-            u32 parseErrorCounter = 0;
-            if ((ec = readRegister(registers::parse_error_counter, parseErrorCounter)))
+            // Also read the cmd_pipe_full debug register and output it.
+            u32 cmdPipeFull = 0;
+            if ((ec = readRegister(registers::cmd_pipe_full, cmdPipeFull)))
             {
-                logger->warn("stackTransaction: stackRef={:#010x}, attempt={} -> {}, failed reading parse_error_counter register", stackRef, attempt, ec.message());
+                logger->warn("stackTransaction: stackRef={:#010x}, attempt={} -> {}, failed reading cmd_pipe_full register", stackRef, attempt, ec.message());
             }
-            else if (parseErrorCounter > 0 || true)
+            else if (cmdPipeFull != 0x1000)
             {
-                logger->warn("stackTransaction: stackRef={:#010x}, attempt={} -> parse_error_counter register value = {}", stackRef, attempt, parseErrorCounter);
+                logger->warn("stackTransaction: stackRef={:#010x}, attempt={} -> cmd_pipe_full register value = {:#06x}", stackRef, attempt, cmdPipeFull);
             }
         }
     } while (ec && ++attempt < TransactionMaxAttempts);
