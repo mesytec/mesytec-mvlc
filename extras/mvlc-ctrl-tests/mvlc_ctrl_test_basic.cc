@@ -300,6 +300,103 @@ TEST_P(MVLCTestBase, TestUploadExceedStackMem)
     ASSERT_EQ(ec, MVLCErrorCode::StackMemoryExceeded);
 }
 
+// Stack sizes around the upload part sizes used for ETH (180 words) and USB
+// (768 words).
+TEST_P(MVLCTestBase, TestUploadStackPartBoundaries)
+{
+    auto ec = mvlc.connect();
+    ASSERT_TRUE(!ec) << ec.message();
+    ASSERT_TRUE(mvlc.isConnected());
+
+    static const u16 uploadAddress = 512 * 4;
+
+    for (size_t n: { 179, 180, 181, 182, 183, 359, 360, 361, 362, 363, 767, 768, 769 })
+    {
+        std::vector<u32> stackBuffer;
+
+        for (size_t i=0; i<n; ++i)
+            stackBuffer.push_back((n << 16) | i);
+
+        ec = mvlc.uploadStack(DataPipe, uploadAddress, stackBuffer);
+        ASSERT_TRUE(!ec) << "n=" << n << ": " << ec.message();
+
+        auto readBuffer = read_stack_from_memory(mvlc, uploadAddress);
+        ASSERT_EQ(stackBuffer, readBuffer) << "n=" << n;
+    }
+
+    auto counters = mvlc.getCmdPipeCounters();
+    ASSERT_EQ(counters.superTransactionRetries, 0);
+}
+
+// Super transactions of n reference words. The response is the mirrored
+// request split into F1/F2 frames. Covers responses that are an exact multiple
+// of the USB max packet size.
+TEST_P(MVLCTestBase, TestSuperTransactionSizes)
+{
+    auto ec = mvlc.connect();
+    ASSERT_TRUE(!ec) << ec.message();
+    ASSERT_TRUE(mvlc.isConnected());
+
+    // ETH: (366 + 2) * 4 = 1472 bytes, the max UDP payload size.
+    const size_t maxN = mvlc.connectionType() == ConnectionType::ETH ? 366 : 1100;
+
+    for (size_t n=1; n<=maxN; ++n)
+    {
+        SuperCommandBuilder sb;
+
+        for (size_t i=0; i<n; ++i)
+            sb.addReferenceWord(static_cast<u16>(i));
+
+        auto request = make_command_buffer(sb);
+        std::vector<u32> response;
+
+        ec = mvlc.superTransaction(sb, response);
+        ASSERT_TRUE(!ec) << "n=" << n << ": " << ec.message();
+
+        std::vector<u32> contents;
+
+        for (size_t i=0; i<response.size();)
+        {
+            auto fi = extract_frame_info(response[i]);
+            ASSERT_TRUE(fi.type == frame_headers::SuperFrame
+                        || fi.type == frame_headers::SuperContinuation)
+                << fmt::format("n={}, bad frame header {:#010x} at {}", n, response[i], i);
+            ASSERT_LE(i + 1 + fi.len, response.size()) << "n=" << n;
+            contents.insert(contents.end(), response.begin() + i + 1, response.begin() + i + 1 + fi.len);
+            i += 1 + fi.len;
+        }
+
+        ASSERT_EQ(contents, std::vector<u32>(request.begin() + 1, request.end() - 1)) << "n=" << n;
+    }
+
+    auto counters = mvlc.getCmdPipeCounters();
+    ASSERT_EQ(counters.superTransactionRetries, 0);
+}
+
+TEST_P(MVLCTestBase, TestSuperTransactionExceedUdpMaxPayload)
+{
+    if (mvlc.connectionType() != ConnectionType::ETH)
+        GTEST_SKIP() << "ETH only";
+
+    auto ec = mvlc.connect();
+    ASSERT_TRUE(!ec) << ec.message();
+    ASSERT_TRUE(mvlc.isConnected());
+
+    // (367 + 2) * 4 = 1476 bytes
+    SuperCommandBuilder sb;
+
+    for (size_t i=0; i<367; ++i)
+        sb.addReferenceWord(static_cast<u16>(i));
+
+    std::vector<u32> response;
+    ec = mvlc.superTransaction(sb, response);
+    ASSERT_EQ(ec, MVLCErrorCode::UdpMaxOutgoingPacketSizeExceeded);
+
+    u32 value = 0;
+    ec = mvlc.readRegister(registers::firmware_revision, value);
+    ASSERT_TRUE(!ec) << ec.message();
+}
+
 INSTANTIATE_TEST_SUITE_P(MVLCTest, MVLCTestBase,
     ::testing::Values("eth", "usb"),
     [] (const auto &info) { return info.param; } /* name generator */

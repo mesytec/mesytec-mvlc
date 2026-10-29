@@ -1,6 +1,7 @@
 # Oversized ETH writes
 
-Fixed 2026-10-29 (uncommitted at time of writing).
+Fixed 2026-10-29 in a4c86fb9. Covered by the controller tests `TestUploadStackPartBoundaries`
+and `TestSuperTransactionExceedUdpMaxPayload` in `extras/mvlc-ctrl-tests/mvlc_ctrl_test_basic.cc`.
 
 - `eth::write_to_socket()` returns `MVLCErrorCode::UdpMaxOutgoingPacketSizeExceeded` for payloads
   > 1472 bytes instead of asserting. Without the assert (release builds) `send()` did not fail but
